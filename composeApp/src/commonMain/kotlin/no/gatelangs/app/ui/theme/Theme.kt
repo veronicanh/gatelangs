@@ -50,6 +50,12 @@ private val DarkColors = darkColorScheme(
  * Colours for the road overlay drawn on the map canvas. These are *not* part of the
  * Material scheme: they are picked to stay legible on top of raster tiles rather than
  * on top of [MaterialTheme]'s own surfaces.
+ *
+ * [unwalked] is the loud one, and that inversion is the point. Green-on-grey rewarded
+ * you for where you had been, but the useful question when you are standing in the
+ * street is *where haven't I been*, and the answer was drawn in 40% grey underneath
+ * everything else. Amber reads as work outstanding, and it fades from the map as the
+ * city gets finished.
  */
 data class MapColors(
     val walked: Color,
@@ -59,27 +65,36 @@ data class MapColors(
 )
 
 private val LightMapColors = MapColors(
-    walked = Color(0xFF00A05A),
-    unwalked = Color(0x66424A44),
+    walked = Color(0xFF6FAE8F),
+    unwalked = Color(0xFFC2620A),
     currentPosition = Color(0xFF0B64D6),
     positionHalo = Color(0x330B64D6),
 )
 
 private val DarkMapColors = MapColors(
-    walked = Color(0xFF3BE08D),
-    unwalked = Color(0x80B6BFB6),
+    walked = Color(0xFF3F8C68),
+    unwalked = Color(0xFFFFBE3D),
     currentPosition = Color(0xFF63A8FF),
     positionHalo = Color(0x3363A8FF),
 )
 
 val LocalMapColors = staticCompositionLocalOf { LightMapColors }
 
+/**
+ * Whether the dark theme is in force, for the things Material cannot answer for — chiefly
+ * which basemap to fetch, which is a network concern rather than a colour.
+ */
+val LocalIsDarkTheme = staticCompositionLocalOf { true }
+
 @Composable
 fun GatelangsTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
-    CompositionLocalProvider(LocalMapColors provides if (darkTheme) DarkMapColors else LightMapColors) {
+    CompositionLocalProvider(
+        LocalMapColors provides if (darkTheme) DarkMapColors else LightMapColors,
+        LocalIsDarkTheme provides darkTheme,
+    ) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColors else LightColors,
             content = content,

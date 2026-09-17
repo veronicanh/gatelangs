@@ -88,10 +88,10 @@ class CoverageTest {
     }
 
     @Test
-    fun `a parallel street beyond the match radius is not claimed`() {
-        // The streets are 18 m apart and the match radius is 15 m, so walking one must
-        // not credit the other. Radius alone settles this case; the bearing gate is for
-        // streets that cross.
+    fun `a parallel street is not claimed`() {
+        // 18 m apart, which is inside the 25 m search radius — so this is settled by
+        // crediting only the nearest road, not by the radius and not by the bearing gate
+        // (both streets run east, so the gate lets both through).
         val coverage = Coverage(parallelStreets())
         var t = 0L
         var east = 0.0
@@ -111,11 +111,12 @@ class CoverageTest {
     }
 
     @Test
-    fun `a parallel street inside the match radius is also claimed - a known limitation`() {
-        // Streets 10 m apart on the same bearing are genuinely ambiguous to a single GPS
-        // fix: neither the radius nor the bearing gate can separate them. Recorded here
-        // as accepted behaviour rather than fixed — separating them needs map matching
-        // across the whole trace (Viterbi over candidate paths), not a per-fix decision.
+    fun `a street 10 m away is not claimed either`() {
+        // This used to be recorded as an accepted limitation: both streets sat inside the
+        // match radius on the same bearing, so every fix credited both and walking one
+        // street silently completed its neighbour. It is what "streets that are not
+        // really walked are marked" meant. Crediting only the nearest settles it — 10 m
+        // is ambiguous to a *radius*, but not to a comparison.
         val network = RoadNetwork.from(
             listOf(
                 RawWay(1L, "Sorgata", listOf(at(0.0, 0.0), at(500.0, 0.0))),
@@ -131,10 +132,69 @@ class CoverageTest {
             t += 1_000
         }
 
-        assertTrue(
-            coverage.fractionOfWay(2L) > 0.9,
-            "expected the street 10 m away to be claimed as well",
+        assertTrue(coverage.fractionOfWay(1L) > 0.9, "the street walked should be covered")
+        assertEquals(
+            0.0,
+            coverage.fractionOfWay(2L),
+            1e-9,
+            "the street 10 m away was not walked and must not be marked",
         )
+    }
+
+    @Test
+    fun `re-walking a finished street keeps matching that street`() {
+        // The trap in crediting only the nearest: if already-walked segments were skipped
+        // when choosing, then on a street you have finished the nearest *unwalked* road
+        // wins instead — which is the one next door. Walking a street twice has to stay
+        // on it.
+        val coverage = Coverage(parallelStreets())
+        repeat(2) { lap ->
+            var east = 0.0
+            var t = lap * 1_000_000L
+            while (east <= 500.0) {
+                coverage.record(fix(east, 0.0, t = t))
+                east += 5.0
+                t += 1_000
+            }
+        }
+
+        assertEquals(
+            0.0,
+            coverage.fractionOfWay(2L),
+            1e-9,
+            "the second lap leaked onto the parallel street",
+        )
+    }
+
+    @Test
+    fun `credits one road per fix`() {
+        // Standing at a junction is still one road, not two.
+        val network = RoadNetwork.from(
+            listOf(
+                RawWay(1L, "Langsgata", listOf(at(0.0, 0.0), at(500.0, 0.0))),
+                RawWay(2L, "Sidegata", listOf(at(0.0, 3.0), at(500.0, 3.0))),
+            )
+        )
+        val coverage = Coverage(network)
+        assertEquals(1, coverage.record(fix(250.0, 0.0)).size, "a fix must credit exactly one road")
+    }
+
+    @Test
+    fun `credits the road underfoot even when the heading is off it`() {
+        // The regression this guards. A hard 45 deg bearing filter refused the road
+        // directly below the marker whenever the direction of travel was a little off
+        // it — which, walking with eight keyboard directions along streets that run at
+        // whatever angle they run at, is most of them. Measured against the real Oslo
+        // snapshot, 11% of fixes sitting squarely on a road matched nothing at all.
+        val coverage = Coverage(oneStreet()) // runs east, so bearing 90
+        val firstFix = coverage.record(fix(0.0, 40.0, t = 0))
+        assertEquals(0, firstFix.size, "40 m out should be beyond the search radius")
+
+        // Arrives 5 m from the street on a heading 60 deg off it: too far off for the old
+        // filter, and plainly still on the street.
+        val walked = coverage.record(fix(20.2, 5.0, t = 1_000))
+
+        assertTrue(walked.isNotEmpty(), "the road under the marker was not credited")
     }
 
     @Test

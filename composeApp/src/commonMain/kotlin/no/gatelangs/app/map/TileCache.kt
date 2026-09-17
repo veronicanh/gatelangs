@@ -1,7 +1,10 @@
 package no.gatelangs.app.map
 
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
@@ -28,13 +31,34 @@ import kotlinx.coroutines.sync.withPermit
 class TileCache(
     private val client: HttpClient,
     private val scope: CoroutineScope,
-    private val source: TileSource,
+    source: TileSource,
     private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
 ) {
     private val tiles = mutableStateMapOf<TileKey, ImageBitmap>()
     private val inFlight = HashSet<TileKey>()
     private val insertionOrder = ArrayDeque<TileKey>()
     private val gate = Semaphore(MAX_CONCURRENT_REQUESTS)
+
+    /**
+     * Bumped whenever [source] changes, so tiles already in flight for the old basemap
+     * are dropped on arrival instead of being painted over the new one.
+     */
+    private var generation = 0
+
+    /** Snapshot-backed so a screen showing the basemap's attribution follows a swap. */
+    private var current by mutableStateOf(source)
+
+    /** Where tiles come from. Setting it to a different source empties the cache. */
+    var source: TileSource
+        get() = current
+        set(value) {
+            if (value == current) return
+            current = value
+            generation++
+            tiles.clear()
+            insertionOrder.clear()
+            inFlight.clear()
+        }
 
     /** The tile if it is already loaded, else null. Never blocks, never starts a fetch. */
     operator fun get(key: TileKey): ImageBitmap? = tiles[key]
@@ -44,18 +68,23 @@ class TileCache(
         for (key in keys) {
             if (key.zoom > source.maxZoom) continue
             if (tiles.containsKey(key) || !inFlight.add(key)) continue
+            val requested = generation
+            val from = source
             scope.launch {
                 try {
                     val image = gate.withPermit {
-                        decodeImage(client.get(source.urlFor(key)).readRawBytes())
+                        decodeImage(client.get(from.urlFor(key)).readRawBytes())
                     }
-                    if (image != null) put(key, image)
+                    if (image != null && requested == generation) put(key, image)
                 } catch (_: Throwable) {
                     // A failed tile is a hole in the backdrop, not a broken app: the
                     // roads and the coverage maths do not depend on it. Dropping the
                     // key from inFlight lets a later pan retry it.
                 } finally {
-                    inFlight.remove(key)
+                    // Only if the basemap has not changed underneath us — the swap
+                    // already cleared inFlight, and the key may have been re-added for
+                    // the new source since.
+                    if (requested == generation) inFlight.remove(key)
                 }
             }
         }

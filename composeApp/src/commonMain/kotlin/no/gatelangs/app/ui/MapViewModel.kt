@@ -25,6 +25,14 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
 
+/**
+ * Which screen is showing.
+ *
+ * Two screens and one edge between them do not pay for a navigation library, a back
+ * stack or a route type — this is the whole of it.
+ */
+enum class Screen { MAP, PROGRESS }
+
 /** What the map screen is currently doing. */
 sealed interface LoadState {
     data object Loading : LoadState
@@ -39,9 +47,12 @@ class MapViewModel : ViewModel() {
     private val storage = Storage()
 
     val mapState = MapState(center = INITIAL_CENTER, zoom = INITIAL_ZOOM)
-    val tiles = TileCache(http, viewModelScope, TileSource.OpenStreetMap)
+    val tiles = TileCache(http, viewModelScope, TileSource.CartoDarkMatter)
 
     var loadState: LoadState by mutableStateOf(LoadState.Loading)
+        private set
+
+    var screen: Screen by mutableStateOf(Screen.MAP)
         private set
 
     var coverage: Coverage? by mutableStateOf(null)
@@ -103,6 +114,9 @@ class MapViewModel : ViewModel() {
     private var trackingJob: Job? = null
     private var lastPersist: TimeMark? = null
 
+    /** Where walked state is saved for the network now loaded. Empty until one is. */
+    private var walkedKey: String = ""
+
     init {
         load()
     }
@@ -113,12 +127,20 @@ class MapViewModel : ViewModel() {
             val result = runCatching { repository.load(RoadRepository.DEFAULT_AREA) }
             loadState = result.fold(
                 onSuccess = { loaded ->
+                    walkedKey = "walked-${loaded.source.name.lowercase()}-" +
+                        "${loaded.network.segments.size}"
                     val restored = Coverage(loaded.network).apply {
                         // Segment ids are positional, so they are only meaningful against
                         // the same network. Keying the saved state by the network's shape
                         // means a refreshed road download starts clean instead of lighting
                         // up unrelated streets.
-                        val saved = storage.read(walkedKey(loaded.network.segments.size))
+                        //
+                        // Keyed by source as well as size, because the two paths can
+                        // agree on a segment count while disagreeing on what segment 400
+                        // is: the snapshot is ordered by way id, Overpass returns its own
+                        // order. Restoring one into the other would light up a scatter of
+                        // streets nobody walked.
+                        val saved = storage.read(walkedKey)
                         if (saved != null) restore(WalkedCodec.decode(saved))
                     }
                     coverage = restored
@@ -129,6 +151,19 @@ class MapViewModel : ViewModel() {
                 onFailure = { LoadState.Failed(it.message ?: it::class.simpleName ?: "unknown error") },
             )
         }
+    }
+
+    fun showProgress() {
+        screen = Screen.PROGRESS
+    }
+
+    fun showMap() {
+        screen = Screen.MAP
+    }
+
+    /** Keeps the basemap in step with the theme. Swapping it empties the tile cache. */
+    fun setDarkBasemap(dark: Boolean) {
+        tiles.source = if (dark) TileSource.CartoDarkMatter else TileSource.OpenStreetMap
     }
 
     fun toggleTracking() {
@@ -167,7 +202,7 @@ class MapViewModel : ViewModel() {
                 positionAccuracyM = fix.accuracyM
                 if (activeCoverage.record(fix).isNotEmpty()) {
                     coverageRevision++
-                    persist(ready.network.segments.size, activeCoverage)
+                    persist(activeCoverage)
                 }
                 if (followPosition) mapState.moveTo(fix.position)
             }
@@ -179,16 +214,15 @@ class MapViewModel : ViewModel() {
      * would mean a disk or localStorage write every second of a walk, for a value that
      * barely changes.
      */
-    private fun persist(networkSize: Int, coverage: Coverage) {
+    private fun persist(coverage: Coverage) {
+        if (walkedKey.isEmpty()) return
         val since = lastPersist
         if (since != null && since.elapsedNow() < PERSIST_INTERVAL) return
         lastPersist = TimeSource.Monotonic.markNow()
         viewModelScope.launch {
-            storage.write(walkedKey(networkSize), WalkedCodec.encode(coverage.walkedIds()))
+            storage.write(walkedKey, WalkedCodec.encode(coverage.walkedIds()))
         }
     }
-
-    private fun walkedKey(networkSize: Int): String = "walked-$networkSize"
 
     private fun stopTracking() {
         trackingJob?.cancel()
@@ -198,11 +232,10 @@ class MapViewModel : ViewModel() {
         keyboardWalker = null
 
         // Flush on stop, so the throttle above can never lose the tail of a walk.
-        val network = (loadState as? LoadState.Ready)?.network
         val active = coverage
-        if (network != null && active != null) {
+        if (active != null) {
             lastPersist = null
-            persist(network.segments.size, active)
+            persist(active)
         }
     }
 

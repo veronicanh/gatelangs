@@ -122,10 +122,12 @@ private fun DrawScope.drawRoads(
     val ids = network.index.inBounds(state.visibleBounds())
     val width = strokeWidthFor(state.zoom)
 
-    // Two passes so walked roads always sit on top at junctions, rather than depending
-    // on the order the grid happens to return.
+    // Two passes, walked first, so unwalked road sits on top at every junction rather
+    // than depending on the order the grid happens to return. Deliberately the opposite
+    // way round from before: what is left to walk is the thing worth looking at, so it
+    // gets the top layer and the heavier stroke, and finished road sinks behind it.
     for (pass in 0..1) {
-        val drawingWalked = pass == 1
+        val drawingWalked = pass == 0
         for (id in ids) {
             val isWalked = coverage?.isWalked(id) == true
             if (isWalked != drawingWalked) continue
@@ -134,7 +136,7 @@ private fun DrawScope.drawRoads(
                 color = if (isWalked) walkedColor else unwalkedColor,
                 start = state.screenOf(segment.a),
                 end = state.screenOf(segment.b),
-                strokeWidth = if (isWalked) width * 1.35f else width,
+                strokeWidth = if (isWalked) width else width * 1.4f,
                 cap = StrokeCap.Round,
             )
         }

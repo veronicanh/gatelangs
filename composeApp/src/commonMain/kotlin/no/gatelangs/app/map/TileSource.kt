@@ -31,5 +31,21 @@ data class TileSource(
             attribution = "© OpenStreetMap contributors",
         )
 
+        /**
+         * CARTO's Dark Matter: a near-black basemap with the labels dimmed right down.
+         *
+         * The app is about the road overlay, not the backdrop, and on the standard OSM
+         * raster the unwalked roads had to compete with a map already full of coloured
+         * streets. Against this they are the only bright thing on screen, which is the
+         * whole point — what is left to walk should be what you see.
+         *
+         * Free, no API key, and serves `access-control-allow-origin: *` so the Wasm
+         * build can fetch it directly. Attribution is a condition of use, not a nicety.
+         */
+        val CartoDarkMatter = TileSource(
+            urlTemplate = "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+            attribution = "© OpenStreetMap contributors © CARTO",
+            maxZoom = 20,
+        )
     }
 }

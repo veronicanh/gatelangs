@@ -18,6 +18,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -27,10 +28,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import no.gatelangs.app.data.RoadSource
+import no.gatelangs.app.ui.theme.LocalIsDarkTheme
 import kotlin.math.roundToInt
 
 @Composable
 fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
+    // One source of truth for dark: the theme decides, and the basemap follows.
+    val dark = LocalIsDarkTheme.current
+    LaunchedEffect(dark) { viewModel.setDarkBasemap(dark) }
+
     Box(
         Modifier.fillMaxSize().walkerKeyControls(
             walker = viewModel.keyboardWalker,
@@ -56,7 +62,9 @@ fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
                 Button(onClick = viewModel::load) { Text("Try again") }
             }
 
-            is LoadState.Ready -> {
+            is LoadState.Ready -> if (viewModel.screen == Screen.PROGRESS) {
+                ProgressScreen(viewModel, state, viewModel.coverageRevision)
+            } else {
                 // Reading the revision here is what ties the canvas to coverage changes:
                 // Coverage mutates a BooleanArray in place, which Compose cannot observe.
                 val revision = viewModel.coverageRevision
@@ -77,7 +85,16 @@ fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
                     verticalArrangement = Arrangement.SpaceBetween,
                 ) {
                     CoveragePanel(viewModel, state)
-                    Controls(viewModel)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Controls(viewModel)
+                        // Both OpenStreetMap and CARTO require this to be shown. It is a
+                        // condition of using the tiles, not decoration.
+                        Text(
+                            viewModel.tiles.source.attribution,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
         }
@@ -93,6 +110,8 @@ private fun CoveragePanel(viewModel: MapViewModel, state: LoadState.Ready) {
         shape = RoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
         tonalElevation = 3.dp,
+        // The overall number is the natural way in to the breakdown behind it.
+        onClick = viewModel::showProgress,
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -110,9 +129,17 @@ private fun CoveragePanel(viewModel: MapViewModel, state: LoadState.Ready) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (state.source == RoadSource.BUNDLED) {
+            Text(
+                "By neighbourhood and street  ›",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            // The bundled snapshot is now the normal path, so silence is the good news.
+            // Overpass only runs when the snapshot could not be read, which is worth
+            // saying out loud because it means the roads may not match what is saved.
+            if (state.source == RoadSource.OVERPASS) {
                 Text(
-                    "Offline snapshot — Overpass was unreachable",
+                    "Live from Overpass — the bundled snapshot could not be read",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -178,8 +205,8 @@ private fun CenteredMessage(content: @Composable () -> Unit) {
     }
 }
 
-/** One decimal place, without pulling in a formatting library for two call sites. */
-private fun Double.toTenths(): String {
+/** One decimal place, without pulling in a formatting library for a handful of call sites. */
+internal fun Double.toTenths(): String {
     val scaled = (this * 10).roundToInt()
     return "${scaled / 10}.${scaled % 10}"
 }

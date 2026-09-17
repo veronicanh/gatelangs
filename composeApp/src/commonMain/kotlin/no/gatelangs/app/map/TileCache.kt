@@ -26,12 +26,17 @@ import kotlinx.coroutines.sync.withPermit
  *    open a hundred sockets at once — and does not look like abuse to the tile server.
  *  - **Bounded size** with oldest-first eviction, so a long session does not grow
  *    without limit.
+ *
+ * Behind the in-memory map sits [store], which survives restarts: a tile is fetched from
+ * the network once ever, not once per run. The lookup order is memory, then store, then
+ * the network — so walking the same neighbourhood on a second day costs no requests at all.
  */
 @Stable
 class TileCache(
     private val client: HttpClient,
     private val scope: CoroutineScope,
     source: TileSource,
+    private val store: TileStore = createTileStore(),
     private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
 ) {
     private val tiles = mutableStateMapOf<TileKey, ImageBitmap>()
@@ -72,9 +77,10 @@ class TileCache(
             val from = source
             scope.launch {
                 try {
-                    val image = gate.withPermit {
-                        decodeImage(client.get(from.urlFor(key)).readRawBytes())
-                    }
+                    // The store first, and outside the semaphore: that gate exists to be
+                    // polite to the tile server, and reading a local file is neither slow
+                    // nor anyone else's business.
+                    val image = fromStore(from, key) ?: fromNetwork(from, key)
                     if (image != null && requested == generation) put(key, image)
                 } catch (_: Throwable) {
                     // A failed tile is a hole in the backdrop, not a broken app: the
@@ -89,6 +95,27 @@ class TileCache(
             }
         }
     }
+
+    /**
+     * The stored tile, or null if there is not a usable one.
+     *
+     * Bytes that fail to decode are treated as a miss rather than as a failure, so a tile
+     * truncated by a crash or a full disk is re-fetched and overwritten instead of leaving
+     * a permanent hole in the map.
+     */
+    private suspend fun fromStore(from: TileSource, key: TileKey): ImageBitmap? {
+        val bytes = store.read(from.id, key) ?: return null
+        return decodeImage(bytes)
+    }
+
+    /** Fetches, and keeps what it got — but only once it is known to be an image. */
+    private suspend fun fromNetwork(from: TileSource, key: TileKey): ImageBitmap? =
+        gate.withPermit {
+            val bytes = client.get(from.urlFor(key)).readRawBytes()
+            // Storing only what decodes keeps error pages and rate-limit responses from
+            // being cached forever as if they were tiles.
+            decodeImage(bytes)?.also { store.write(from.id, key, bytes) }
+        }
 
     private fun put(key: TileKey, image: ImageBitmap) {
         tiles[key] = image

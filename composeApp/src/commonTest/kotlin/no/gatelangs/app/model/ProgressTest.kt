@@ -1,48 +1,14 @@
 package no.gatelangs.app.model
 
-import no.gatelangs.app.geo.LatLon
-import no.gatelangs.app.geo.MetricProjection
-import no.gatelangs.app.geo.Vec2
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-
-private val ORIGIN = LatLon(59.9139, 10.7522)
-private val PROJECTION = MetricProjection(ORIGIN)
-
-private fun at(east: Double, north: Double): LatLon = PROJECTION.unproject(Vec2(east, north))
-
-/**
- * Parkveien arrives as two OSM ways, the way a real street does — the point of most of
- * what follows. Plus a side street, and a stretch OSM never named.
- */
-private fun town(): RoadNetwork = RoadNetwork.from(
-    ways = listOf(
-        RawWay(1L, "Parkveien", listOf(at(0.0, 0.0), at(200.0, 0.0))),
-        RawWay(2L, "Parkveien", listOf(at(200.0, 0.0), at(400.0, 0.0))),
-        RawWay(3L, "Sidegata", listOf(at(0.0, 100.0), at(100.0, 100.0))),
-        RawWay(4L, null, listOf(at(0.0, 200.0), at(50.0, 200.0))),
-    ),
-    districts = listOf(
-        District("Vest", listOf(box(west = -50.0, east = 200.0))),
-        District("Øst", listOf(box(west = 200.0, east = 500.0))),
-    ),
-)
-
-/** A rectangle from [west] to [east], tall enough to hold every street in [town]. */
-private fun box(west: Double, east: Double): List<LatLon> = listOf(
-    at(west, -50.0),
-    at(east, -50.0),
-    at(east, 300.0),
-    at(west, 300.0),
-    at(west, -50.0),
-)
 
 class StreetGroupingTest {
 
     @Test
     fun `a street split across ways is one street`() {
-        val network = town()
+        val network = TestTown.network()
         assertEquals(
             400.0,
             network.lengthOf(network.segmentsByStreet.getValue("Parkveien")),
@@ -55,7 +21,7 @@ class StreetGroupingTest {
 
     @Test
     fun `walking one of a street's ways gets it half way`() {
-        val network = town()
+        val network = TestTown.network()
         val coverage = Coverage(network)
         coverage.restore(network.segmentsByWay.getValue(1L))
 
@@ -68,7 +34,7 @@ class StreetGroupingTest {
         // The two metrics agree only when segments are equal length, which segmentize
         // does not promise: it caps at 25 m but leaves shorter spans alone. The headline
         // figure is by length, so this one has to be too or the screen contradicts itself.
-        val network = town()
+        val network = TestTown.network()
         val coverage = Coverage(network)
         val ids = network.segmentsByStreet.getValue("Parkveien")
         coverage.restore(ids.take(3).toIntArray())
@@ -79,7 +45,7 @@ class StreetGroupingTest {
 
     @Test
     fun `an unwalked street reports nothing, an unknown one too`() {
-        val coverage = Coverage(town())
+        val coverage = Coverage(TestTown.network())
         assertEquals(0.0, coverage.fractionOfStreet("Sidegata"), 1e-9)
         assertEquals(0.0, coverage.fractionOfStreet("Nowhere gate"), 1e-9)
     }
@@ -89,7 +55,7 @@ class DistrictTest {
 
     @Test
     fun `every segment joins exactly one district`() {
-        val network = town()
+        val network = TestTown.network()
         assertTrue(network.districtOfSegment.all { it >= 0 }, "a segment was left unassigned")
         assertEquals(
             network.segments.size,
@@ -101,7 +67,7 @@ class DistrictTest {
     @Test
     fun `district lengths add up to the whole network`() {
         // The property that lets the breakdown be trusted against the headline number.
-        val network = town()
+        val network = TestTown.network()
         assertEquals(
             network.totalLengthM,
             network.segmentsByDistrict.values.sumOf { network.lengthOf(it) },
@@ -111,7 +77,7 @@ class DistrictTest {
 
     @Test
     fun `segments join the district they lie inside`() {
-        val network = town()
+        val network = TestTown.network()
         val west = network.segmentsByDistrict.getValue("Vest")
         val east = network.segmentsByDistrict.getValue("Øst")
 
@@ -127,7 +93,7 @@ class DistrictTest {
 
     @Test
     fun `a street crossing a boundary reports only its local part in each`() {
-        val network = town()
+        val network = TestTown.network()
         val coverage = Coverage(network)
         coverage.restore(network.segmentsByWay.getValue(1L)) // the western half only
 
@@ -146,7 +112,7 @@ class DistrictTest {
 
     @Test
     fun `unnamed road gets a row of its own so the totals still add up`() {
-        val network = town()
+        val network = TestTown.network()
         val coverage = Coverage(network)
 
         val streets = coverage.byStreet(network)
@@ -161,7 +127,7 @@ class DistrictTest {
 
     @Test
     fun `the breakdown is ranked most finished first`() {
-        val network = town()
+        val network = TestTown.network()
         val coverage = Coverage(network)
         coverage.restore(network.segmentsByWay.getValue(3L)) // all of Sidegata
 
@@ -181,7 +147,7 @@ class DistrictTest {
     fun `a network with no districts degrades quietly`() {
         // The live Overpass path comes back without outlines by design.
         val network = RoadNetwork.from(
-            listOf(RawWay(1L, "Enegata", listOf(at(0.0, 0.0), at(100.0, 0.0))))
+            listOf(RawWay(1L, "Enegata", listOf(TestTown.at(0.0, 0.0), TestTown.at(100.0, 0.0))))
         )
         assertTrue(network.segmentsByDistrict.isEmpty())
         assertTrue(Coverage(network).byDistrict(network).isEmpty())
@@ -193,8 +159,10 @@ class DistrictTest {
         // Nearest-centre had no way to say "none of them". Outlines do, and a road filed
         // under a bydel it is nowhere near would be worse than a gap.
         val network = RoadNetwork.from(
-            ways = listOf(RawWay(1L, "Langtvekkgata", listOf(at(900.0, 0.0), at(1000.0, 0.0)))),
-            districts = listOf(District("Vest", listOf(box(west = -50.0, east = 200.0)))),
+            ways = listOf(
+                RawWay(1L, "Langtvekkgata", listOf(TestTown.at(900.0, 0.0), TestTown.at(1000.0, 0.0))),
+            ),
+            districts = listOf(District("Vest", listOf(TestTown.box(west = -50.0, east = 200.0)))),
         )
         assertTrue(network.districtOfSegment.all { it < 0 })
         assertTrue(network.segmentsByDistrict.isEmpty())

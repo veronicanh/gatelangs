@@ -47,6 +47,18 @@ fun Coverage.byStreet(network: RoadNetwork): List<Progress> =
 fun Coverage.streetsIn(network: RoadNetwork, district: String): List<Progress> =
     progressByStreet(network, network.segmentsByDistrict[district]?.toList().orEmpty())
 
+/**
+ * Every bydel's streets, in one go.
+ *
+ * Searching has to look inside all of them at once — the whole point is that you never have
+ * to know which tab a street is on — and eighteen separate calls to [streetsIn] do exactly
+ * this work anyway. Built whole rather than per-bydel-on-demand also kills the `remember`
+ * that used to live *inside* a lazy item, which is a cache whose lifetime was whether you
+ * happened to scroll past it.
+ */
+fun Coverage.streetsByDistrict(network: RoadNetwork): Map<String, List<Progress>> =
+    network.segmentsByDistrict.mapValues { (_, ids) -> progressByStreet(network, ids.toList()) }
+
 private fun Coverage.progressByStreet(network: RoadNetwork, ids: List<Int>): List<Progress> =
     ids.groupBy { network.streetNameOf(it) ?: UNNAMED_ROADS }
         .map { (name, segments) -> progressOf(network, name, segments.toIntArray()) }

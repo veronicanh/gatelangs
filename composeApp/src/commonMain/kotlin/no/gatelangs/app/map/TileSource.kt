@@ -11,6 +11,14 @@ data class TileKey(val zoom: Int, val x: Int, val y: Int)
  * reasons about comes from Overpass regardless of who draws the backdrop.
  */
 data class TileSource(
+    /**
+     * Stable name for this basemap, used as the [TileStore] directory.
+     *
+     * Deliberately not derived from [urlTemplate]: the template carries the API key, so a
+     * key change would look like a different basemap and throw away every cached tile for
+     * imagery that had not changed.
+     */
+    val id: String,
     val urlTemplate: String,
     val attribution: String,
     val maxZoom: Int = 19,
@@ -27,6 +35,7 @@ data class TileSource(
          * User-Agent — fine for this, but it is not a CDN to hammer.
          */
         val OpenStreetMap = TileSource(
+            id = "osm",
             urlTemplate = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
             attribution = "© OpenStreetMap contributors",
         )
@@ -39,13 +48,37 @@ data class TileSource(
          * streets. Against this they are the only bright thing on screen, which is the
          * whole point — what is left to walk should be what you see.
          *
-         * Free, no API key, and serves `access-control-allow-origin: *` so the Wasm
-         * build can fetch it directly. Attribution is a condition of use, not a nicety.
+         * Serves `access-control-allow-origin: *`, so the Wasm build fetches it directly.
+         * Attribution is a condition of use, not a nicety.
+         *
+         * Keyed from [CARTO_API_KEY] — see [cartoDarkMatter] for what happens without one.
+         * One instance rather than a factory call at each use site: [TileSource] is a data
+         * class and [TileCache] compares sources with `==` to decide whether the basemap
+         * changed, so two equal-but-separate instances would wipe the tile cache on every
+         * theme toggle.
          */
-        val CartoDarkMatter = TileSource(
-            urlTemplate = "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-            attribution = "© OpenStreetMap contributors © CARTO",
-            maxZoom = 20,
-        )
+        val CartoDarkMatter = cartoDarkMatter(CARTO_API_KEY)
     }
 }
+
+/**
+ * CARTO's Dark Matter at a given key.
+ *
+ * Split out from [TileSource.CartoDarkMatter] so the URL shape can be tested at both
+ * settings: the key is a compile-time constant and a test cannot vary a `const`.
+ *
+ * A blank key yields the plain, keyless URL rather than a dangling `?key=`. That is the
+ * fresh-clone path — someone who has just cloned the repo has no `local.properties`, and
+ * the app should still build and draw a map. CARTO still serves those tiles, but since
+ * August 2026 it stamps an "API KEY REQUIRED" watermark across each one, so the backdrop
+ * looks wrong until a key is configured. Nothing breaks; it just looks shabby.
+ */
+internal fun cartoDarkMatter(apiKey: String): TileSource = TileSource(
+    id = "carto-dark",
+    urlTemplate = buildString {
+        append("https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png")
+        if (apiKey.isNotBlank()) append("?key=").append(apiKey)
+    },
+    attribution = "© OpenStreetMap contributors © CARTO",
+    maxZoom = 20,
+)

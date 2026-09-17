@@ -13,6 +13,20 @@ import androidx.compose.ui.graphics.Color
  * Gatelangs palette. The basemap tiles carry most of the colour on screen, so the
  * app chrome stays deliberately quiet and the *road overlay* gets the saturation —
  * a walked street has to read as "walked" at a glance, over any tile underneath.
+ *
+ * Every role named here is one the app actually paints with. The ones *not* named fall back
+ * to Material's stock baseline, a lavender scheme belonging to no part of this app — so
+ * `tertiary`, `error` and the whole `surfaceContainer*` family are off limits until somebody
+ * sets them.
+ *
+ * That is not a style rule. `secondaryContainer` and `outlineVariant` were both unset until
+ * recently, and Material reaches for them without being asked: `secondaryContainer` is the
+ * default track of every `LinearProgressIndicator` and the selected half of the bydel/gate
+ * toggle, `outlineVariant` the default `HorizontalDivider` and chip border. Stock #4A4458
+ * and #49454F were on screen the whole time, on a palette that is otherwise green and
+ * near-black. `Card` is still unusable for the same reason — its container is
+ * `surfaceContainerLow`. Use `Surface(shape, tonalElevation)` instead, which derives from
+ * `surface` and `primary`, both of which are ours.
  */
 private val LightColors = lightColorScheme(
     primary = Color(0xFF1B6B4A),
@@ -21,6 +35,8 @@ private val LightColors = lightColorScheme(
     onPrimaryContainer = Color(0xFF00210F),
     secondary = Color(0xFF4C6358),
     onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFCFE9DA),
+    onSecondaryContainer = Color(0xFF0A1F16),
     background = Color(0xFFF6FBF6),
     onBackground = Color(0xFF181D19),
     surface = Color(0xFFF6FBF6),
@@ -28,6 +44,7 @@ private val LightColors = lightColorScheme(
     surfaceVariant = Color(0xFFDCE5DC),
     onSurfaceVariant = Color(0xFF414942),
     outline = Color(0xFF717972),
+    outlineVariant = Color(0xFFC1CBC2),
 )
 
 private val DarkColors = darkColorScheme(
@@ -37,6 +54,8 @@ private val DarkColors = darkColorScheme(
     onPrimaryContainer = Color(0xFFA7F0C6),
     secondary = Color(0xFFB3CCBE),
     onSecondary = Color(0xFF1E352A),
+    secondaryContainer = Color(0xFF35493E),
+    onSecondaryContainer = Color(0xFFCFE9DA),
     background = Color(0xFF101410),
     onBackground = Color(0xFFDFE4DE),
     surface = Color(0xFF101410),
@@ -44,6 +63,7 @@ private val DarkColors = darkColorScheme(
     surfaceVariant = Color(0xFF414942),
     onSurfaceVariant = Color(0xFFC0C9C0),
     outline = Color(0xFF8B938B),
+    outlineVariant = Color(0xFF3A423B),
 )
 
 /**

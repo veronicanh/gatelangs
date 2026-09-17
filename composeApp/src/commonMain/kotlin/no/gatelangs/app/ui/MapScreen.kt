@@ -44,7 +44,6 @@ import no.gatelangs.app.model.UNNAMED_ROAD
 import no.gatelangs.app.model.districtProgress
 import no.gatelangs.app.model.streetProgress
 import no.gatelangs.app.ui.theme.LocalIsDarkTheme
-import kotlin.math.roundToInt
 
 @Composable
 fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
@@ -270,13 +269,17 @@ private fun CoveragePanel(viewModel: MapViewModel, state: LoadState.Ready, cover
                 style = MaterialTheme.typography.headlineSmall,
             )
             Text(
-                "Du har gått ${(fraction * 100).toTenths()} % av byen",
+                "Du har gått ${percentOf(fraction)} av byen",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             LinearProgressIndicator(
                 progress = { fraction.toFloat() },
                 modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)),
+                // Said out loud rather than left to Material, whose default track is
+                // `secondaryContainer` — a role this theme only started setting recently,
+                // and one whose job here is chips, not the empty half of a bar.
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 drawStopIndicator = {},
             )
 
@@ -365,7 +368,7 @@ private fun WhereLine(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                "${(fraction * 100).toTenths()} %",
+                percentOf(fraction),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 8.dp),
             )
@@ -374,6 +377,7 @@ private fun WhereLine(
             progress = { fraction.toFloat() },
             // Thinner than the city's bar, so the hierarchy still reads at a glance.
             modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+            trackColor = MaterialTheme.colorScheme.surfaceVariant,
             drawStopIndicator = {},
         )
     }
@@ -444,16 +448,4 @@ private fun CenteredMessage(content: @Composable () -> Unit) {
     ) {
         content()
     }
-}
-
-/**
- * One decimal place, comma-separated as Norwegian writes it.
- *
- * The single place every number in the app is formatted, which is what makes the decimal
- * comma one change rather than twenty — and a full stop here is the detail that would make
- * the whole interface read as translated rather than as Norwegian.
- */
-internal fun Double.toTenths(): String {
-    val scaled = (this * 10).roundToInt()
-    return "${scaled / 10},${scaled % 10}"
 }

@@ -6,6 +6,7 @@ import no.gatelangs.app.geo.LatLon
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
 private val OSLO = LatLon(59.9225, 10.7600)
@@ -151,9 +152,44 @@ class MapStateTest {
 
 class TileSourceTest {
 
+    private val tile = TileKey(zoom = 14, x = 8681, y = 4765)
+
     @Test
     fun `fills in the tile template`() {
-        val url = TileSource.OpenStreetMap.urlFor(TileKey(zoom = 14, x = 8681, y = 4765))
+        val url = TileSource.OpenStreetMap.urlFor(tile)
         assertEquals("https://tile.openstreetmap.org/14/8681/4765.png", url)
+    }
+
+    @Test
+    fun `a keyed carto source carries the key`() {
+        assertEquals(
+            "https://basemaps.cartocdn.com/dark_all/14/8681/4765.png?key=abc123",
+            cartoDarkMatter("abc123").urlFor(tile),
+            "the key rides in the query string, after the tile coordinates are filled in",
+        )
+    }
+
+    @Test
+    fun `no key means the plain carto url`() {
+        // The fresh-clone path: no local.properties, so the constant is empty and the URL
+        // has to come out exactly as it did before any of this — no dangling '?key='.
+        val keyless = "https://basemaps.cartocdn.com/dark_all/14/8681/4765.png"
+        assertEquals(keyless, cartoDarkMatter("").urlFor(tile))
+        assertEquals(keyless, cartoDarkMatter("   ").urlFor(tile))
+    }
+
+    @Test
+    fun `two carto sources on the same key are interchangeable`() {
+        // TileCache decides the basemap has changed by comparing sources with ==, and
+        // wipes every cached tile when it thinks so. Keeping equality by value means a
+        // second source built from the same key is not mistaken for a new basemap —
+        // which is what would otherwise refetch the whole viewport on a theme toggle.
+        assertEquals(cartoDarkMatter("abc123"), cartoDarkMatter("abc123"))
+        assertEquals(TileSource.CartoDarkMatter, TileSource.CartoDarkMatter)
+    }
+
+    @Test
+    fun `a different key is a different source`() {
+        assertNotEquals(cartoDarkMatter("abc123"), cartoDarkMatter("def456"))
     }
 }

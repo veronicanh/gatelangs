@@ -72,7 +72,11 @@ fun MapCanvas(
                         val event = awaitPointerEvent()
                         if (event.type != PointerEventType.Scroll) continue
                         val change = event.changes.firstOrNull() ?: continue
+                        // A mouse wheel reports +/-1 per notch, but a trackpad reports
+                        // accumulated pixels and can arrive in the tens. Unclamped, one
+                        // flick is 2^(-40 * 0.35) and slams straight into the zoom limit.
                         val ticks = change.scrollDelta.y
+                            .coerceIn(-MAX_SCROLL_TICKS_PER_EVENT, MAX_SCROLL_TICKS_PER_EVENT)
                         if (ticks == 0f) continue
                         // Scroll up (negative) zooms in.
                         state.zoomBy(2.0.pow(-ticks * ZOOM_PER_SCROLL_TICK), change.position)
@@ -169,4 +173,7 @@ private fun strokeWidthFor(zoom: Double): Float = when {
 }
 
 private const val ZOOM_PER_SCROLL_TICK = 0.35
+
+/** Caps one scroll event at ~one zoom level, so a trackpad flick cannot overshoot. */
+private const val MAX_SCROLL_TICKS_PER_EVENT = 3f
 private const val METRES_PER_DEGREE_LAT = 111_195.0

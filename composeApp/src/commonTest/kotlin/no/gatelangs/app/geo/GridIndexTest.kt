@@ -104,6 +104,55 @@ class GridIndexTest {
     }
 
     @Test
+    fun `answers a viewport far larger than the network without hanging`() {
+        // Regression: zooming out made the app unresponsive. collect() looped over every
+        // cell in the requested range, and at the minimum zoom the visible box spans
+        // hundreds of degrees — ~235000 x ~378000 cells, 89 billion lookups per frame,
+        // against ~1200 that hold anything. Queries are now clamped to the occupied
+        // extent, so this returns immediately instead of never.
+        val segments = (0 until 200).map { eastwardSegment(projection, it * 25.0, 0.0, 25.0) }
+        val index = GridIndex.build(segments, ORIGIN)
+
+        val worldwide = BoundingBox(south = -85.0, west = -180.0, north = 85.0, east = 180.0)
+        val hits = index.inBounds(worldwide)
+
+        assertEquals(segments.size, hits.size, "a box containing everything must return everything")
+    }
+
+    @Test
+    fun `answers a huge radius query without hanging`() {
+        val segments = (0 until 200).map { eastwardSegment(projection, it * 25.0, 0.0, 25.0) }
+        val index = GridIndex.build(segments, ORIGIN)
+
+        val hits = index.near(ORIGIN, radiusM = 20_000_000.0)
+        assertEquals(segments.size, hits.size)
+    }
+
+    @Test
+    fun `returns nothing for a viewport that misses the network entirely`() {
+        val segments = (0 until 50).map { eastwardSegment(projection, it * 25.0, 0.0, 25.0) }
+        val index = GridIndex.build(segments, ORIGIN)
+
+        // Australia, while the data is in Oslo.
+        val elsewhere = BoundingBox(south = -35.0, west = 148.0, north = -33.0, east = 152.0)
+        assertEquals(0, index.inBounds(elsewhere).size)
+    }
+
+    @Test
+    fun `clamping does not lose segments at the edge of the extent`() {
+        // The clamp must not trim the outermost cells, or the first and last segment of
+        // a network would silently stop being drawn or matched.
+        val segments = (0 until 40).map { eastwardSegment(projection, it * 25.0, 0.0, 25.0) }
+        val index = GridIndex.build(segments, ORIGIN)
+
+        val everything = index.inBounds(
+            BoundingBox(south = -85.0, west = -180.0, north = 85.0, east = 180.0)
+        ).toList()
+        assertTrue(0 in everything, "first segment missing")
+        assertTrue(segments.lastIndex in everything, "last segment missing")
+    }
+
+    @Test
     fun `handles an empty network`() {
         val index = GridIndex.build(emptyList(), ORIGIN)
         assertEquals(0, index.size())

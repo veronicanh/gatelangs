@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import no.gatelangs.app.data.RoadRepository
 import no.gatelangs.app.data.RoadSource
@@ -17,10 +18,13 @@ import no.gatelangs.app.map.MapState
 import no.gatelangs.app.map.TileCache
 import no.gatelangs.app.map.TileSource
 import no.gatelangs.app.map.createHttpClient
+import no.gatelangs.app.model.Achievement
 import no.gatelangs.app.model.Coverage
+import no.gatelangs.app.model.Milestones
 import no.gatelangs.app.model.RoadNetwork
 import no.gatelangs.app.storage.Storage
 import no.gatelangs.app.storage.WalkedCodec
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.TimeMark
 import kotlin.time.TimeSource
@@ -107,12 +111,34 @@ class MapViewModel : ViewModel() {
     var keyboardWalker: KeyboardWalker? by mutableStateOf(null)
         private set
 
+    /**
+     * The achievement on screen, if any.
+     *
+     * One at a time: several streets can cross a line on the same fix at a junction, and
+     * stacking the popups would cover the map you are walking on. [pendingAchievements]
+     * holds the rest.
+     */
+    var achievement: Achievement? by mutableStateOf(null)
+        private set
+
+    /**
+     * Whether it should be on screen.
+     *
+     * Separate from [achievement] so the banner still has something to draw while it
+     * animates out — the content outlives the visibility by design.
+     */
+    var achievementVisible: Boolean by mutableStateOf(false)
+        private set
+
     /** Bumped whenever coverage changes, so the map redraws without diffing a BooleanArray. */
     var coverageRevision: Int by mutableStateOf(0)
         private set
 
     private var trackingJob: Job? = null
     private var lastPersist: TimeMark? = null
+    private var milestones: Milestones? = null
+    private var announcer: Job? = null
+    private val pendingAchievements = ArrayDeque<Achievement>()
 
     /** Where walked state is saved for the network now loaded. Empty until one is. */
     private var walkedKey: String = ""
@@ -144,6 +170,9 @@ class MapViewModel : ViewModel() {
                         if (saved != null) restore(WalkedCodec.decode(saved))
                     }
                     coverage = restored
+                    // Seeded, not checked: restoring a walk in progress must not fire a
+                    // popup for every street that was already past halfway last time.
+                    milestones = Milestones(loaded.network).apply { seed(restored) }
                     coverageRevision++
                     mapState.moveTo(loaded.network.bounds.center)
                     LoadState.Ready(loaded.network, loaded.source)
@@ -200,11 +229,39 @@ class MapViewModel : ViewModel() {
             source.fixes().collect { fix ->
                 position = fix.position
                 positionAccuracyM = fix.accuracyM
-                if (activeCoverage.record(fix).isNotEmpty()) {
+                val walked = activeCoverage.record(fix)
+                if (walked.isNotEmpty()) {
                     coverageRevision++
                     persist(activeCoverage)
+                    milestones?.check(activeCoverage, walked)?.let(::announce)
                 }
                 if (followPosition) mapState.moveTo(fix.position)
+            }
+        }
+    }
+
+    /**
+     * Queues achievements and shows them one after another.
+     *
+     * A queue rather than a replacement, because the interesting case is exactly the one
+     * that would be lost: finishing a street usually means finishing it at a junction,
+     * where the same fix can tip a second street over a line too.
+     */
+    private fun announce(earned: List<Achievement>) {
+        if (earned.isEmpty()) return
+        pendingAchievements += earned
+        if (announcer?.isActive == true) return
+
+        announcer = viewModelScope.launch {
+            while (pendingAchievements.isNotEmpty()) {
+                val next = pendingAchievements.removeFirst()
+                achievement = next
+                achievementVisible = true
+                delay(if (next.milestone.isCleared) CLEARED_SHOWN_FOR else PROGRESS_SHOWN_FOR)
+                achievementVisible = false
+                // Long enough for the exit to finish, and a beat of nothing after it so
+                // two in a row read as two rather than as one flickering.
+                delay(BETWEEN_ACHIEVEMENTS)
             }
         }
     }
@@ -227,6 +284,11 @@ class MapViewModel : ViewModel() {
     private fun stopTracking() {
         trackingJob?.cancel()
         trackingJob = null
+        announcer?.cancel()
+        announcer = null
+        pendingAchievements.clear()
+        achievementVisible = false
+        achievement = null
         isTracking = false
         keyboardWalker?.releaseAll()
         keyboardWalker = null
@@ -249,5 +311,10 @@ class MapViewModel : ViewModel() {
         private val INITIAL_CENTER = LatLon(59.9225, 10.7600)
         private const val INITIAL_ZOOM = 15.0
         private val PERSIST_INTERVAL = 5.seconds
+
+        /** Finishing a street is the one worth stopping to read. */
+        private val CLEARED_SHOWN_FOR = 4.seconds
+        private val PROGRESS_SHOWN_FOR = 2.seconds
+        private val BETWEEN_ACHIEVEMENTS = 400.milliseconds
     }
 }

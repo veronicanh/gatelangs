@@ -39,19 +39,29 @@ class BundledRoadsTest {
     }
 
     @Test
-    fun `the snapshot carries the places to group progress by`() = runTest {
-        // The progress screen breaks the city into strøk, and they travel in the same
-        // file as the roads. A snapshot without them silently degrades to a flat list of
-        // every street in Oslo.
+    fun `the snapshot carries the bydel outlines to group progress by`() = runTest {
+        // The progress screen breaks the city into bydeler, and they travel in the same
+        // file as the roads. A snapshot without them degrades to a flat list of every
+        // street in Oslo.
         val network = repository().loadBundled()
         assertTrue(
-            network.neighbourhoods.size >= 10,
-            "only ${network.neighbourhoods.size} neighbourhoods in the snapshot",
+            network.districts.size >= 15,
+            "only ${network.districts.size} bydeler in the snapshot",
         )
         assertTrue(
-            network.neighbourhoods.all { it.centre in network.bounds },
-            "a neighbourhood sits outside the roads it is meant to group",
+            network.districts.all { d -> d.rings.isNotEmpty() && d.rings.all { it.size >= 4 } },
+            "a bydel arrived without a usable outline",
         )
+    }
+
+    @Test
+    fun `nearly every metre of road falls inside a bydel`() = runTest {
+        // Oslo's bydeler tile the whole municipality, so anything left over is a rounding
+        // artefact of simplifying the outlines rather than a real gap. Measured at 0.35%.
+        val network = repository().loadBundled()
+        val assigned = network.segmentsByDistrict.values.sumOf { network.lengthOf(it) }
+        val share = assigned / network.totalLengthM
+        assertTrue(share > 0.98, "only ${(share * 100).toInt()}% of road landed in a bydel")
     }
 
     @Test

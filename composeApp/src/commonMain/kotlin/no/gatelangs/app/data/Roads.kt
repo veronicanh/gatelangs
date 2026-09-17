@@ -8,7 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import no.gatelangs.app.geo.BoundingBox
 import no.gatelangs.app.geo.LatLon
-import no.gatelangs.app.model.Neighbourhood
+import no.gatelangs.app.model.District
 import no.gatelangs.app.model.RawWay
 import no.gatelangs.app.model.RoadNetwork
 import no.gatelangs.app.resources.Res
@@ -44,14 +44,6 @@ private val STREET_HIGHWAYS = setOf(
 /** [STREET_HIGHWAYS] as an Overpass regex, so the filtering also happens server-side. */
 private val STREET_HIGHWAYS_REGEX = STREET_HIGHWAYS.joinToString("|", prefix = "^(", postfix = ")$")
 
-/**
- * OSM place types that read as a part of town you would name in conversation.
- *
- * `suburb` and `quarter` are the Oslo strøk — Tøyen, Sofienberg, Rodeløkka. `city` and
- * `town` are excluded because one of them would swallow everything.
- */
-private const val PLACE_TYPES_REGEX = "^(suburb|quarter|neighbourhood)$"
-
 private val json = Json { ignoreUnknownKeys = true }
 
 // --- Overpass ---------------------------------------------------------------------
@@ -65,9 +57,6 @@ private data class OverpassElement(
     val id: Long = 0,
     val tags: Map<String, String> = emptyMap(),
     val geometry: List<OverpassPoint> = emptyList(),
-    /** Set on nodes only; ways carry their coordinates in [geometry] instead. */
-    val lat: Double? = null,
-    val lon: Double? = null,
 )
 
 @Serializable
@@ -82,11 +71,15 @@ private data class OverpassPoint(val lat: Double, val lon: Double)
 @Serializable
 private data class BundledRoads(
     val ways: List<BundledWay> = emptyList(),
-    val places: List<BundledPlace> = emptyList(),
+    val districts: List<BundledDistrict> = emptyList(),
 )
 
+/** One bydel outline: rings of `[lat, lon]` pairs, in the same compact form as the ways. */
 @Serializable
-private data class BundledPlace(val name: String, val lat: Double, val lon: Double)
+private data class BundledDistrict(
+    val name: String,
+    val rings: List<List<List<Double>>> = emptyList(),
+)
 
 @Serializable
 private data class BundledWay(
@@ -120,39 +113,26 @@ class RoadRepository(private val http: HttpClient) {
         runCatching { LoadedRoads(loadBundled(), RoadSource.BUNDLED) }
             .getOrElse { LoadedRoads(fetchFromOverpass(area), RoadSource.OVERPASS) }
 
+    /**
+     * Roads only. Bydel outlines are not fetched live — they come from Oslo kommune
+     * rather than from OSM, and they change on the scale of decades. A network loaded
+     * this way has no districts, and the progress screen falls back to a flat list of
+     * streets, which is the honest thing for it to do.
+     */
     suspend fun fetchFromOverpass(area: BoundingBox): RoadNetwork {
         val bbox = "(${area.south},${area.west},${area.north},${area.east})"
-        // Streets and the places to group them by in one request: two round trips to a
-        // service this slow is the difference between a pause and a wait.
-        val query = buildString {
-            append("[out:json][timeout:90];(")
-            append("way[\"highway\"~\"$STREET_HIGHWAYS_REGEX\"]$bbox;")
-            append("node[\"place\"~\"$PLACE_TYPES_REGEX\"]$bbox;")
-            append(");")
-            // `out geom` inlines each way's node coordinates, so there is no second
-            // request to resolve node references and no join to do here.
-            append("out geom;")
-        }
+        // `out geom` inlines each way's node coordinates, so there is no second request
+        // to resolve node references and no join to do here.
+        val query = "[out:json][timeout:90];" +
+            "way[\"highway\"~\"$STREET_HIGHWAYS_REGEX\"]$bbox;" +
+            "out geom;"
 
         val body = http.submitForm(
             url = OVERPASS_ENDPOINT,
             formParameters = Parameters.build { append("data", query) },
         ).bodyAsText()
 
-        val elements = json.decodeFromString(OverpassResponse.serializer(), body).elements
-
-        val neighbourhoods = elements.mapNotNull { element ->
-            val name = element.tags["name"]
-            val lat = element.lat
-            val lon = element.lon
-            if (element.type != "node" || name == null || lat == null || lon == null) {
-                null
-            } else {
-                Neighbourhood(name, LatLon(lat, lon))
-            }
-        }
-
-        val ways = elements
+        val ways = json.decodeFromString(OverpassResponse.serializer(), body).elements
             .filter { it.type == "way" && it.geometry.size >= 2 }
             .map { element ->
                 RawWay(
@@ -165,7 +145,7 @@ class RoadRepository(private val http: HttpClient) {
             .filter { it.highway in STREET_HIGHWAYS }
 
         require(ways.isNotEmpty()) { "Overpass returned no walkable ways for $area" }
-        return RoadNetwork.from(ways, neighbourhoods)
+        return RoadNetwork.from(ways)
     }
 
     suspend fun loadBundled(): RoadNetwork {
@@ -186,7 +166,12 @@ class RoadRepository(private val http: HttpClient) {
         require(ways.isNotEmpty()) { "bundled road data at $BUNDLED_PATH is empty" }
         return RoadNetwork.from(
             ways = ways,
-            neighbourhoods = bundled.places.map { Neighbourhood(it.name, LatLon(it.lat, it.lon)) },
+            districts = bundled.districts.map { district ->
+                District(
+                    name = district.name,
+                    rings = district.rings.map { ring -> ring.map { LatLon(it[0], it[1]) } },
+                )
+            },
         )
     }
 

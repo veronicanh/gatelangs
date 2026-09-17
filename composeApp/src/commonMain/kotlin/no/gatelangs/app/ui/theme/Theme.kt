@@ -56,6 +56,12 @@ private val DarkColors = darkColorScheme(
  * street is *where haven't I been*, and the answer was drawn in 40% grey underneath
  * everything else. Amber reads as work outstanding, and it fades from the map as the
  * city gets finished.
+ *
+ * [walked] is a plain grey line. Grey is the colour of a road that no longer needs
+ * anything from you: it carries no meaning of its own, so it does not compete with the
+ * amber for attention, and a finished part of the city settles back into the basemap.
+ * Mid grey rather than dark, because the basemap under it is nearly black and a road
+ * has to stay distinguishable from the ground it is drawn on.
  */
 data class MapColors(
     val walked: Color,
@@ -65,14 +71,14 @@ data class MapColors(
 )
 
 private val LightMapColors = MapColors(
-    walked = Color(0xFF6FAE8F),
+    walked = Color(0xFF6B6F76),
     unwalked = Color(0xFFC2620A),
     currentPosition = Color(0xFF0B64D6),
     positionHalo = Color(0x330B64D6),
 )
 
 private val DarkMapColors = MapColors(
-    walked = Color(0xFF3F8C68),
+    walked = Color(0xFF8C9199),
     unwalked = Color(0xFFFFBE3D),
     currentPosition = Color(0xFF63A8FF),
     positionHalo = Color(0x3363A8FF),

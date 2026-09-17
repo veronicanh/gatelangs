@@ -27,9 +27,9 @@ private val MOST_COMPLETE = compareByDescending<Progress> { it.fraction }
 private fun Coverage.progressOf(network: RoadNetwork, name: String, ids: IntArray) =
     Progress(name = name, walkedM = walkedLengthOf(ids), totalM = network.lengthOf(ids))
 
-/** Progress for each neighbourhood in the network. */
-fun Coverage.byNeighbourhood(network: RoadNetwork): List<Progress> =
-    network.segmentsByNeighbourhood
+/** Progress for each bydel in the network. */
+fun Coverage.byDistrict(network: RoadNetwork): List<Progress> =
+    network.segmentsByDistrict
         .map { (name, ids) -> progressOf(network, name, ids) }
         .sortedWith(MOST_COMPLETE)
 
@@ -38,14 +38,14 @@ fun Coverage.byStreet(network: RoadNetwork): List<Progress> =
     progressByStreet(network, network.segments.indices.toList())
 
 /**
- * The streets of one neighbourhood.
+ * The streets of one bydel.
  *
- * Grouped from that neighbourhood's own segments rather than by looking each street up
- * whole, so a street running through two neighbourhoods appears in both, each time
- * reporting only the part that is actually there.
+ * Grouped from that bydel's own segments rather than by looking each street up whole, so
+ * a street running through two bydeler appears in both, each time reporting only the part
+ * that is actually there.
  */
-fun Coverage.streetsIn(network: RoadNetwork, neighbourhood: String): List<Progress> =
-    progressByStreet(network, network.segmentsByNeighbourhood[neighbourhood]?.toList().orEmpty())
+fun Coverage.streetsIn(network: RoadNetwork, district: String): List<Progress> =
+    progressByStreet(network, network.segmentsByDistrict[district]?.toList().orEmpty())
 
 private fun Coverage.progressByStreet(network: RoadNetwork, ids: List<Int>): List<Progress> =
     ids.groupBy { network.streetNameOf(it) ?: UNNAMED_ROADS }

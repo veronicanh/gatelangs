@@ -125,7 +125,8 @@ private fun DrawScope.drawRoads(
     // Two passes, walked first, so unwalked road sits on top at every junction rather
     // than depending on the order the grid happens to return. Deliberately the opposite
     // way round from before: what is left to walk is the thing worth looking at, so it
-    // gets the top layer and the heavier stroke, and finished road sinks behind it.
+    // gets the top layer and the heavier stroke, and finished road sinks behind it as a
+    // thinner grey line.
     for (pass in 0..1) {
         val drawingWalked = pass == 0
         for (id in ids) {

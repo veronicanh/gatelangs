@@ -23,10 +23,19 @@ private fun town(): RoadNetwork = RoadNetwork.from(
         RawWay(3L, "Sidegata", listOf(at(0.0, 100.0), at(100.0, 100.0))),
         RawWay(4L, null, listOf(at(0.0, 200.0), at(50.0, 200.0))),
     ),
-    neighbourhoods = listOf(
-        Neighbourhood("Vest", at(0.0, 50.0)),
-        Neighbourhood("Øst", at(400.0, 50.0)),
+    districts = listOf(
+        District("Vest", listOf(box(west = -50.0, east = 200.0))),
+        District("Øst", listOf(box(west = 200.0, east = 500.0))),
     ),
+)
+
+/** A rectangle from [west] to [east], tall enough to hold every street in [town]. */
+private fun box(west: Double, east: Double): List<LatLon> = listOf(
+    at(west, -50.0),
+    at(east, -50.0),
+    at(east, 300.0),
+    at(west, 300.0),
+    at(west, -50.0),
 )
 
 class StreetGroupingTest {
@@ -76,35 +85,35 @@ class StreetGroupingTest {
     }
 }
 
-class NeighbourhoodTest {
+class DistrictTest {
 
     @Test
-    fun `every segment joins exactly one neighbourhood`() {
+    fun `every segment joins exactly one district`() {
         val network = town()
-        assertTrue(network.neighbourhoodOfSegment.all { it >= 0 }, "a segment was left unassigned")
+        assertTrue(network.districtOfSegment.all { it >= 0 }, "a segment was left unassigned")
         assertEquals(
             network.segments.size,
-            network.segmentsByNeighbourhood.values.sumOf { it.size },
-            "segments must be counted once, not shared between neighbourhoods",
+            network.segmentsByDistrict.values.sumOf { it.size },
+            "segments must be counted once, not shared between districts",
         )
     }
 
     @Test
-    fun `neighbourhood lengths add up to the whole network`() {
+    fun `district lengths add up to the whole network`() {
         // The property that lets the breakdown be trusted against the headline number.
         val network = town()
         assertEquals(
             network.totalLengthM,
-            network.segmentsByNeighbourhood.values.sumOf { network.lengthOf(it) },
+            network.segmentsByDistrict.values.sumOf { network.lengthOf(it) },
             1e-6,
         )
     }
 
     @Test
-    fun `segments join the nearer of two neighbourhoods`() {
+    fun `segments join the district they lie inside`() {
         val network = town()
-        val west = network.segmentsByNeighbourhood.getValue("Vest")
-        val east = network.segmentsByNeighbourhood.getValue("Øst")
+        val west = network.segmentsByDistrict.getValue("Vest")
+        val east = network.segmentsByDistrict.getValue("Øst")
 
         // Parkveien runs east from the origin, so its far end belongs to Øst and its
         // near end to Vest.
@@ -169,13 +178,25 @@ class NeighbourhoodTest {
     }
 
     @Test
-    fun `a network with no neighbourhoods degrades quietly`() {
-        // The Overpass path can legitimately come back without any place nodes.
+    fun `a network with no districts degrades quietly`() {
+        // The live Overpass path comes back without outlines by design.
         val network = RoadNetwork.from(
             listOf(RawWay(1L, "Enegata", listOf(at(0.0, 0.0), at(100.0, 0.0))))
         )
-        assertTrue(network.segmentsByNeighbourhood.isEmpty())
-        assertTrue(Coverage(network).byNeighbourhood(network).isEmpty())
-        assertTrue(network.neighbourhoodOfSegment.all { it < 0 })
+        assertTrue(network.segmentsByDistrict.isEmpty())
+        assertTrue(Coverage(network).byDistrict(network).isEmpty())
+        assertTrue(network.districtOfSegment.all { it < 0 })
+    }
+
+    @Test
+    fun `road outside every district is left unassigned rather than forced into one`() {
+        // Nearest-centre had no way to say "none of them". Outlines do, and a road filed
+        // under a bydel it is nowhere near would be worse than a gap.
+        val network = RoadNetwork.from(
+            ways = listOf(RawWay(1L, "Langtvekkgata", listOf(at(900.0, 0.0), at(1000.0, 0.0)))),
+            districts = listOf(District("Vest", listOf(box(west = -50.0, east = 200.0)))),
+        )
+        assertTrue(network.districtOfSegment.all { it < 0 })
+        assertTrue(network.segmentsByDistrict.isEmpty())
     }
 }

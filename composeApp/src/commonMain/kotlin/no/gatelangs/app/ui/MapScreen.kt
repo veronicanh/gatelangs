@@ -1,5 +1,10 @@
 package no.gatelangs.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +33,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import no.gatelangs.app.data.RoadSource
+import no.gatelangs.app.model.Achievement
 import no.gatelangs.app.ui.theme.LocalIsDarkTheme
 import kotlin.math.roundToInt
 
@@ -86,6 +92,15 @@ fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
                 ) {
                     CoveragePanel(viewModel, state)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // In the layout rather than floating over it: the coverage panel
+                        // owns the top corner and the marker owns the middle, and a
+                        // banner that covered either would hide the thing it is
+                        // congratulating you about.
+                        AchievementBanner(
+                            achievement = viewModel.achievement,
+                            visible = viewModel.achievementVisible,
+                            modifier = Modifier.align(Alignment.CenterHorizontally),
+                        )
                         Controls(viewModel)
                         // Both OpenStreetMap and CARTO require this to be shown. It is a
                         // condition of using the tiles, not decoration.
@@ -96,6 +111,70 @@ fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Announces a street reaching a milestone, then gets out of the way.
+ *
+ * Finishing a street is the event worth celebrating, so it gets a filled card and four
+ * seconds. Halfway and nearly-there are encouragement rather than news: a quiet pill,
+ * two seconds, and no colour of its own.
+ */
+@Composable
+private fun AchievementBanner(
+    achievement: Achievement?,
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn() + slideInVertically { it / 2 },
+        exit = fadeOut() + slideOutVertically { it / 2 },
+        modifier = modifier,
+    ) {
+        // Outlives `visible`, which is the point: the content has to survive the exit.
+        val current = achievement ?: return@AnimatedVisibility
+        if (current.milestone.isCleared) {
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                tonalElevation = 6.dp,
+                shadowElevation = 8.dp,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("🏁", style = MaterialTheme.typography.headlineSmall)
+                    Column {
+                        Text(
+                            current.milestone.title,
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            current.street,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        } else {
+            Surface(
+                shape = RoundedCornerShape(11.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+                tonalElevation = 2.dp,
+            ) {
+                Text(
+                    "${current.street}  ·  ${current.milestone.title.lowercase()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                )
             }
         }
     }
@@ -130,7 +209,7 @@ private fun CoveragePanel(viewModel: MapViewModel, state: LoadState.Ready) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "By neighbourhood and street  ›",
+                "By bydel and street  ›",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
             )

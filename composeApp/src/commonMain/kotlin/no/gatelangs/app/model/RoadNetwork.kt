@@ -4,6 +4,7 @@ import no.gatelangs.app.geo.BoundingBox
 import no.gatelangs.app.geo.GridIndex
 import no.gatelangs.app.geo.LatLon
 import no.gatelangs.app.geo.MetricProjection
+import no.gatelangs.app.geo.Ring
 import no.gatelangs.app.geo.Segment
 import no.gatelangs.app.geo.length
 import no.gatelangs.app.geo.segmentize
@@ -19,8 +20,8 @@ class RoadNetwork(
     val streetNames: Map<Long, String?>,
     val index: GridIndex,
     val bounds: BoundingBox,
-    /** Named places to group progress by. Empty if the snapshot carried none. */
-    val neighbourhoods: List<Neighbourhood> = emptyList(),
+    /** Districts to group progress by. Empty if the snapshot carried none. */
+    val districts: List<District> = emptyList(),
 ) {
     val projection: MetricProjection get() = index.projection
 
@@ -53,41 +54,35 @@ class RoadNetwork(
             .mapNotNull { (name, ids) -> name?.let { it to ids.toIntArray() } }
             .toMap()
 
-    /**
-     * Index into [neighbourhoods] for each segment, or -1 where there are none.
-     *
-     * OSM gives neighbourhoods as single points, not outlines, so a segment joins the
-     * nearest one and the boundaries fall where the halfway line does. Rough at the
-     * edges and exactly right in the middle, which is the useful half.
-     */
-    val neighbourhoodOfSegment: IntArray = run {
-        if (neighbourhoods.isEmpty()) return@run IntArray(segments.size) { -1 }
+    /** Each district's outlines, projected once so the assignment below stays cheap. */
+    private val districtRings: List<List<Ring>> =
+        districts.map { district -> district.rings.map { Ring(it.map(projection::project)) } }
 
-        // Projected once rather than per segment: this is tens of thousands of segments
-        // against tens of places, so the inner loop is the one that has to be cheap.
-        val centres = neighbourhoods.map { projection.project(it.centre) }
+    /**
+     * Index into [districts] for each segment, or -1 for one that falls in none.
+     *
+     * By the segment's midpoint, and by real boundaries rather than by nearest centre
+     * point: a street belongs to the bydel it is actually in, including right up against
+     * the border, which is exactly where nearest-centre got it wrong.
+     *
+     * A segment outside every district keeps -1 rather than being forced into the closest
+     * one. Oslo's bydeler tile the whole municipality, so this should be nothing at all —
+     * and if a snapshot ever reaches past them, an honest gap beats a road filed under a
+     * district it is nowhere near.
+     */
+    val districtOfSegment: IntArray = run {
+        if (districtRings.isEmpty()) return@run IntArray(segments.size) { -1 }
         IntArray(segments.size) { id ->
             val mid = projection.project(midpointOf(id))
-            var best = 0
-            var bestDistance = Double.MAX_VALUE
-            for (index in centres.indices) {
-                val dx = mid.x - centres[index].x
-                val dy = mid.y - centres[index].y
-                val squared = dx * dx + dy * dy // comparing, so no need for the root
-                if (squared < bestDistance) {
-                    bestDistance = squared
-                    best = index
-                }
-            }
-            best
+            districtRings.indexOfFirst { rings -> rings.any { mid in it } }
         }
     }
 
-    /** Segment ids grouped by the neighbourhood they fall in. */
-    val segmentsByNeighbourhood: Map<String, IntArray> =
-        segments.indices.groupBy { neighbourhoodOfSegment[it] }
+    /** Segment ids grouped by the district they fall in. */
+    val segmentsByDistrict: Map<String, IntArray> =
+        segments.indices.groupBy { districtOfSegment[it] }
             .mapNotNull { (index, ids) ->
-                if (index < 0) null else (neighbourhoods[index].name to ids.toIntArray())
+                if (index < 0) null else (districts[index].name to ids.toIntArray())
             }
             .toMap()
 
@@ -114,7 +109,7 @@ class RoadNetwork(
          * keeps the equirectangular approximation tightest where the segments actually
          * are.
          */
-        fun from(ways: List<RawWay>, neighbourhoods: List<Neighbourhood> = emptyList()): RoadNetwork {
+        fun from(ways: List<RawWay>, districts: List<District> = emptyList()): RoadNetwork {
             val allPoints = ways.flatMap { it.points }
             require(allPoints.isNotEmpty()) { "cannot build a road network from no geometry" }
 
@@ -129,20 +124,23 @@ class RoadNetwork(
                 streetNames = ways.associate { it.id to it.name },
                 index = GridIndex.build(segments, bounds.center),
                 bounds = bounds,
-                neighbourhoods = neighbourhoods,
+                districts = districts,
             )
         }
     }
 }
 
 /**
- * A named part of the city — Tøyen, Sofienberg, Rodeløkka.
+ * One of Oslo's bydeler — Gamle Oslo, Grünerløkka, St. Hanshaugen, Frogner.
  *
- * A point, not an outline, because that is how OSM holds them (`place=suburb` and
- * friends) and because outlines would be a second, much larger download for a
- * distinction nobody looks at closely.
+ * An outline rather than a centre point, and an official one: the boundaries come from
+ * Oslo kommune's own `Bydel_og_delbydelsgrenser`, simplified to a 12 m tolerance, which
+ * is far finer than the question "which side of the border is this street on" needs.
+ *
+ * [rings] is a list because a bydel can arrive as more than one piece. Each ring is
+ * closed and outer; the dataset has no holes worth carrying.
  */
-data class Neighbourhood(val name: String, val centre: LatLon)
+data class District(val name: String, val rings: List<List<LatLon>>)
 
 /** One OSM way, as it arrives from Overpass, before flattening. */
 data class RawWay(

@@ -10,8 +10,8 @@ import kotlinx.coroutines.launch
 import no.gatelangs.app.data.RoadRepository
 import no.gatelangs.app.data.RoadSource
 import no.gatelangs.app.geo.LatLon
+import no.gatelangs.app.location.KeyboardWalker
 import no.gatelangs.app.location.LocationSource
-import no.gatelangs.app.location.SimulatedWalker
 import no.gatelangs.app.location.createRealLocationSource
 import no.gatelangs.app.map.MapState
 import no.gatelangs.app.map.TileCache
@@ -61,6 +61,41 @@ class MapViewModel : ViewModel() {
     var locationLabel: String by mutableStateOf("")
         private set
 
+    /**
+     * Whether this platform can offer real GPS at all.
+     *
+     * Asked once: the answer is a property of the platform, not of the moment. It is
+     * what decides whether choosing between GPS and the keyboard is a choice worth
+     * putting on screen.
+     */
+    val hasRealGps: Boolean = createRealLocationSource() != null
+
+    /**
+     * Drive the position from the keyboard rather than from GPS.
+     *
+     * Defaults to on wherever there is no GPS to prefer. It stays settable on top of
+     * GPS because a desktop browser *has* `navigator.geolocation` and it is no use at
+     * all indoors — it would pin you to one spot for the whole demo.
+     */
+    val useKeyboard: Boolean get() = keyboardControl
+
+    /**
+     * Backs [useKeyboard].
+     *
+     * Separate because a `var` with a private setter already compiles to
+     * `setUseKeyboard(Z)V` on the JVM, which [setUseKeyboard] would then clash with.
+     */
+    private var keyboardControl: Boolean by mutableStateOf(!hasRealGps)
+
+    /**
+     * The walker the keyboard drives, while one is running.
+     *
+     * Exposed so the screen can feed it key events. Null when nothing is tracking, or
+     * when the platform has real GPS and the keys have nothing to steer.
+     */
+    var keyboardWalker: KeyboardWalker? by mutableStateOf(null)
+        private set
+
     /** Bumped whenever coverage changes, so the map redraws without diffing a BooleanArray. */
     var coverageRevision: Int by mutableStateOf(0)
         private set
@@ -100,14 +135,29 @@ class MapViewModel : ViewModel() {
         if (isTracking) stopTracking() else startTracking()
     }
 
+    /** Swaps the source under a running walk, rather than making the user stop and start. */
+    fun setUseKeyboard(on: Boolean) {
+        if (on == keyboardControl) return
+        keyboardControl = on
+        if (isTracking) {
+            stopTracking()
+            startTracking()
+        }
+    }
+
     private fun startTracking() {
         val ready = loadState as? LoadState.Ready ?: return
         val activeCoverage = coverage ?: return
 
-        // Real GPS where the platform has it; the walker keeps the pipeline exercisable
-        // on a laptop, which is also how this gets demoed indoors.
-        val source: LocationSource = createRealLocationSource()
-            ?: SimulatedWalker(ready.network, isWalked = activeCoverage::isWalked)
+        // Real GPS where the platform has it and it has not been waved off. Otherwise
+        // you drive the position yourself from the keyboard, which is both the dev loop
+        // and how this gets demoed indoors — see MapScreen for the key handling.
+        val real = if (useKeyboard) null else createRealLocationSource()
+        val source: LocationSource = real ?: KeyboardWalker(
+            // Carry on from where the marker already is, so stop/start does not teleport.
+            start = position ?: ready.network.bounds.center,
+            projection = ready.network.projection,
+        ).also { keyboardWalker = it }
         locationLabel = source.label
         isTracking = true
 
@@ -144,6 +194,8 @@ class MapViewModel : ViewModel() {
         trackingJob?.cancel()
         trackingJob = null
         isTracking = false
+        keyboardWalker?.releaseAll()
+        keyboardWalker = null
 
         // Flush on stop, so the throttle above can never lose the tail of a walk.
         val network = (loadState as? LoadState.Ready)?.network

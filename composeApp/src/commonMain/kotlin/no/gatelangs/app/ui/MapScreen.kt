@@ -31,7 +31,14 @@ import kotlin.math.roundToInt
 
 @Composable
 fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier.fillMaxSize().walkerKeyControls(
+            walker = viewModel.keyboardWalker,
+            // Starting or stopping means a click on the button, which takes focus
+            // with it. Take it back, or the first keypress after Start does nothing.
+            refocusOn = viewModel.isTracking,
+        )
+    ) {
         when (val state = viewModel.loadState) {
             is LoadState.Loading -> CenteredMessage {
                 CircularProgressIndicator()
@@ -136,6 +143,17 @@ private fun Controls(viewModel: MapViewModel) {
                         onCheckedChange = { viewModel.followPosition = it },
                     )
                     Text("  Follow", style = MaterialTheme.typography.bodySmall)
+                }
+                // Only worth asking where there is something to choose between: with no
+                // GPS the keyboard is the only way to move at all.
+                if (viewModel.hasRealGps) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(
+                            checked = viewModel.useKeyboard,
+                            onCheckedChange = viewModel::setUseKeyboard,
+                        )
+                        Text("  Keyboard", style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 if (viewModel.locationLabel.isNotEmpty()) {
                     Text(

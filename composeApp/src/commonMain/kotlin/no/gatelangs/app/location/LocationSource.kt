@@ -13,7 +13,7 @@ interface LocationSource {
  * The platform's real GPS, or null when it has none.
  *
  * Desktop returns null — a laptop has no GPS, and pretending otherwise would be worse
- * than saying so. The caller substitutes [SimulatedWalker], which is both the dev loop
+ * than saying so. The caller substitutes [KeyboardWalker], which is both the dev loop
  * and how the app is demoed indoors.
  */
 expect fun createRealLocationSource(): LocationSource?

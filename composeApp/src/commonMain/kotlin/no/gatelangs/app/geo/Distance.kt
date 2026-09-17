@@ -87,3 +87,16 @@ fun bearingDifference(a: Double, b: Double): Double {
     val folded = if (raw > 180.0) 360.0 - raw else raw
     return if (folded > 90.0) 180.0 - folded else folded
 }
+
+/**
+ * Absolute angle between two headings, in `[0, 180]`.
+ *
+ * Unlike [bearingDifference] this keeps the direction of travel: doubling back down the
+ * street you just came up is 180°, not 0°. Matching wants the folded version — a street
+ * is the same street whichever way you walk it — but anything *choosing* where to go
+ * next has to be able to tell carrying straight on from a U-turn.
+ */
+fun headingDifference(a: Double, b: Double): Double {
+    val raw = ((a - b) % 360.0 + 360.0) % 360.0
+    return if (raw > 180.0) 360.0 - raw else raw
+}

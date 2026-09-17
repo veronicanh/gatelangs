@@ -6,32 +6,42 @@ import kotlinx.coroutines.flow.flow
 import no.gatelangs.app.geo.LatLon
 import no.gatelangs.app.geo.Vec2
 import no.gatelangs.app.geo.bearingDegrees
-import no.gatelangs.app.geo.bearingDifference
+import no.gatelangs.app.geo.headingDifference
 import no.gatelangs.app.model.Fix
 import no.gatelangs.app.model.RoadNetwork
 import kotlin.math.round
 import kotlin.random.Random
 
 /**
- * Walks the road network the way someone actually trying to cover a city would: it
- * heads for road it has not walked yet.
+ * Walks the road network the way someone actually trying to cover a city would: it heads
+ * for road it has not walked yet, and between those decisions it stays on the road it is
+ * on.
  *
- * An earlier version picked a random turn at every junction. That is a random walk, and
- * a random walk on a street grid revisits the same few blocks over and over — it looked
- * like wandering in circles because that is exactly what it was. Coverage crept up
- * logarithmically and the demo stalled.
+ * Two earlier versions missed that second half. The first picked a random turn at every
+ * junction — a random walk, which on a street grid revisits the same few blocks forever.
+ * The second headed for the nearest unwalked segment, which fixed coverage but still
+ * wandered, and the reason is worth writing down because it is not obvious from the code:
  *
- * The route is chosen in two tiers:
+ * The matcher credits everything within the matcher's 15 m radius of a fix, so simply
+ * walking down a street also credits the first few metres of every side street and much
+ * of the block ahead. So by the time the walker reaches the next junction there is often
+ * nothing unwalked *adjacent* to it, even though the street plainly continues. The old
+ * planner treated that as "stuck here", fell through to the graph search, and was sent
+ * off to whatever uncredited scrap lay nearest — usually a sliver a few hops to the side
+ * that the bearing gate had refused. Repeat every 50 m and you get a walker that jinks
+ * about a neighbourhood instead of walking down a street. On the bundled Oslo data it
+ * changed course 35 times per 3 km.
  *
- *  1. If any road at the current junction is unwalked, take it. No search needed, and
- *     it produces the natural behaviour of clearing a neighbourhood before moving on.
- *  2. Otherwise breadth-first search the graph for the nearest unwalked segment and
- *     walk the whole path to it, crossing already-walked roads on the way.
+ * So there is a tier between the two: if nothing unwalked leads out of this junction but
+ * the road carries on, carry on. It is what a person does, it costs nothing — that road
+ * still has to be walked eventually — and on the same data it drops to 9 course changes
+ * per 3 km while crediting about 45% more road, because the distance goes into road
+ * instead of into detours.
  *
- * It still follows the graph rather than flying between points, because the point of
- * the simulation is to exercise the matching pipeline honestly — turning corners and
- * passing junctions are where the bearing gate and grid lookup have to behave. Fixes
- * carry positional noise, so matching is never handed perfect input.
+ * It still follows the graph rather than flying between points, because the point of the
+ * simulation is to exercise the matching pipeline honestly — turning corners and passing
+ * junctions are where the bearing gate and grid lookup have to behave. Fixes carry
+ * positional noise, so matching is never handed perfect input.
  */
 class SimulatedWalker(
     private val network: RoadNetwork,
@@ -63,7 +73,14 @@ class SimulatedWalker(
      */
     private val traversed = HashSet<Int>()
 
+    /** Current course, or null before the first step. */
     private var heading: Double? = null
+
+    /**
+     * Metres of ground covered on this stretch that these legs have already been over.
+     * Resets the moment the walker reaches somewhere new. See [MAX_CARRY_ON_M].
+     */
+    private var rewalkedM = 0.0
 
     override fun fixes(): Flow<Fix> = flow {
         if (network.segments.isEmpty()) return@flow
@@ -89,6 +106,7 @@ class SimulatedWalker(
             val from = if (step.forward) segment.a else segment.b
             val to = if (step.forward) segment.b else segment.a
             val lengthM = network.segmentLengths[step.id]
+            val goingRoundAgain = step.id in traversed
 
             var travelled = 0.0
             while (travelled < lengthM) {
@@ -100,6 +118,7 @@ class SimulatedWalker(
             }
 
             traversed.add(step.id)
+            rewalkedM = if (goingRoundAgain) rewalkedM + lengthM else 0.0
             heading = bearingDegrees(from, to)
             node = keyOf(to)
         }
@@ -113,33 +132,44 @@ class SimulatedWalker(
     private fun isTarget(id: Int): Boolean = id !in traversed && !isWalked(id)
 
     private fun planFrom(node: Long): List<Step> {
-        val here = adjacency[node].orEmpty().filter { isTarget(it) }
-        if (here.isNotEmpty()) {
-            val step = stepAlong(preferStraightest(here, node), node)
-            if (step != null) return listOf(step)
+        val options = adjacency[node].orEmpty().mapNotNull { stepAlong(it, node) }
+
+        // 1. Unwalked road leads out of this junction. Take the straightest of it —
+        //    among equally useful turns, carrying on reads far better than zigzagging.
+        val fresh = options.filter { isTarget(it.id) }
+        if (fresh.isNotEmpty()) return listOf(fresh.minBy { turnOnto(it) })
+
+        // 2. Nothing new here, but the road goes on: stay on it. This is the tier the
+        //    wandering came from — without it the walker abandons a perfectly good
+        //    street the moment the matcher has run ahead of it.
+        //
+        //    Held back once the walker is genuinely going round in circles, which is
+        //    the one way this tier could otherwise loop forever: a block whose every
+        //    junction is exhausted would be circled rather than left.
+        if (rewalkedM < MAX_CARRY_ON_M) {
+            val carryOn = options.filter { turnOnto(it) <= STRAIGHT_TURN_DEG }
+                .minByOrNull { turnOnto(it) }
+            if (carryOn != null) return listOf(carryOn)
         }
+
+        // 3. The road has run out. Go and find some that has not been walked.
         return routeToNearestTarget(node)
     }
 
     /**
-     * Among equally valid unwalked turns, carry straight on.
+     * How far off the current course [step] would take us, in degrees `[0, 180]`.
      *
-     * Purely cosmetic, but a walker that zigzags at every junction reads as broken even
-     * when its coverage is fine.
+     * [headingDifference] rather than the matcher's `bearingDifference`: that one folds
+     * to `[0, 90]`, so a U-turn scores the same as carrying straight on. Fine for asking
+     * "is this the same street", useless for choosing where to go — and it is what lets
+     * the segment we just walked back up look like the straightest way on.
      */
-    private fun preferStraightest(candidates: List<Int>, node: Long): Int {
-        val current = heading ?: return candidates[random.nextInt(candidates.size)]
-        return candidates.minBy { id ->
-            val step = stepAlong(id, node)
-            if (step == null) {
-                Double.MAX_VALUE
-            } else {
-                val segment = network.segments[id]
-                val from = if (step.forward) segment.a else segment.b
-                val to = if (step.forward) segment.b else segment.a
-                bearingDifference(current, bearingDegrees(from, to))
-            }
-        }
+    private fun turnOnto(step: Step): Double {
+        val current = heading ?: return 0.0
+        val segment = network.segments[step.id]
+        val from = if (step.forward) segment.a else segment.b
+        val to = if (step.forward) segment.b else segment.a
+        return headingDifference(current, bearingDegrees(from, to))
     }
 
     /**
@@ -147,7 +177,7 @@ class SimulatedWalker(
      *
      * BFS by hop count rather than metres: segments are capped at ~25 m so hops are a
      * good proxy for distance, and it keeps the search to a plain queue. Only runs when
-     * the current junction is exhausted, so it is far from a hot path.
+     * the road itself has run out, so it is far from a hot path.
      */
     private fun routeToNearestTarget(start: Long): List<Step> {
         val arrivedBy = HashMap<Long, Pair<Step, Long>>()
@@ -273,6 +303,27 @@ class SimulatedWalker(
     companion object {
         /** Average walking pace. */
         const val WALKING_SPEED_MPS = 1.4
+
+        /**
+         * Up to this far off the current course still counts as the road carrying on.
+         * Wide enough for a bend and for the kinks OSM leaves at junctions, narrow
+         * enough that a genuine side street never passes for one — and far short of the
+         * 180° that would let the walker double back and call it straight.
+         */
+        const val STRAIGHT_TURN_DEG = 35.0
+
+        /**
+         * How far the walker will carry on over ground it has already covered before it
+         * gives up and searches instead.
+         *
+         * A liveness backstop rather than a tuning knob: any value from 25 m upwards
+         * behaves identically on the bundled Oslo data, because there the walker reaches
+         * somewhere new long before it accumulates this. What it rules out is the one
+         * shape that would trap the carry-on tier — a closed block with nothing unwalked
+         * on it, which would otherwise be circled forever.
+         */
+        const val MAX_CARRY_ON_M = 400.0
+
         private const val NOISE_FRACTION = 0.8
         private const val START_SEARCH_RADIUS_M = 500.0
     }

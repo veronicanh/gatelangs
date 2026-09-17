@@ -392,7 +392,17 @@ private fun Controls(viewModel: MapViewModel) {
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Button(onClick = viewModel::toggleTracking) {
-                Text(if (viewModel.isTracking) "Stopp" else "Start simulering")
+                Text(
+                    when {
+                        viewModel.isTracking -> "Stopp"
+                        // Naming what the button will actually do. The keyboard walker is
+                        // a simulation and saying so is honest; real GPS is a walk, and
+                        // calling that a simulation would be a lie on the one platform
+                        // where the position is genuinely yours.
+                        viewModel.useKeyboard -> "Start simulering"
+                        else -> "Start å gå"
+                    }
+                )
             }
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -27,6 +27,9 @@ class Coverage(private val network: RoadNetwork) {
     private var walkedLengthM = 0.0
     private var previous: Fix? = null
 
+    /** The segment the last fix matched, or -1. Used to fill the span between fixes. */
+    private var previousMatch = -1
+
     /** Whether segment [id] has been walked. */
     fun isWalked(id: Int): Boolean = walked[id]
 
@@ -66,22 +69,27 @@ class Coverage(private val network: RoadNetwork) {
         fractionOf(network.segmentsByStreet[name] ?: return 0.0)
 
     /**
-     * Folds a fix into the coverage, returning the segment newly marked walked, if any.
+     * Folds a fix into the coverage, returning the segments newly marked walked.
      *
-     * You are on one road at a time, so exactly one is credited — see [bestMatch] for
-     * which. An earlier version credited *every* segment within the radius, which is
+     * Two questions, kept apart on purpose. *Which road are you on* is answered once, by
+     * [bestMatch], and exactly one road wins — crediting every road within a radius is
      * where "streets I have not walked are marked" came from: walking four streets'
-     * centrelines credited 2.43 km of road belonging to other streets, a third of
-     * everything it marked. Picking one brings that to 0.10 km, and the 4.66 km it does
-     * credit for those four streets is within 1% of their true length.
+     * centrelines credited 2.43 km belonging to other streets, a third of everything it
+     * marked. *How much of that road did you just cover* is then answered generously,
+     * because once the road is settled there is nothing left to get wrong: more of the
+     * road underfoot is the road you are walking on.
      *
-     * The bearing gate was never what fixed this — the roads being wrongly marked are
-     * the ones *parallel* to the one you are on, so they agree with your heading and
-     * sail straight through it. Distance is what separates them.
+     * Generous in two ways, each fixing a way road went unmarked:
      *
-     * Widening the search while narrowing what is credited is deliberate — a generous
-     * radius now only decides which road is nearest, so it buys tolerance of GPS drift
-     * without buying false positives.
+     * - [creditRoadUnderfoot] takes the rest of the same road within [CREDIT_RADIUS_M].
+     *   At a junction a way often starts with a two-metre stub that no fix is ever
+     *   *nearest* to, so it stayed grey with the walker standing on it.
+     * - [bridgeFromPreviousFix] fills the span between this match and the last one when
+     *   both are the same road. Fixes land 4.5 m apart walking and 13.5 m apart
+     *   sprinting, while a bend in a street produces segments far shorter than the 25 m
+     *   cap — so short segments were being stepped clean over and never credited.
+     *
+     * Neither can reach another street: both are gated on [sameRoad].
      *
      * Fixes too imprecise to mean anything are dropped ([MAX_USABLE_ACCURACY_M]): a
      * reading with a 90 m error circle cannot tell you which street you are on.
@@ -89,18 +97,97 @@ class Coverage(private val network: RoadNetwork) {
     fun record(fix: Fix): IntArray {
         if (fix.accuracyM > MAX_USABLE_ACCURACY_M) {
             previous = fix
+            previousMatch = -1
             return IntArray(0)
         }
 
         val heading = headingFrom(previous, fix)
         previous = fix
 
-        val id = bestMatch(fix, heading)
-        if (id < 0 || walked[id]) return IntArray(0)
+        val matched = bestMatch(fix, heading)
+        if (matched < 0) {
+            previousMatch = -1
+            return IntArray(0)
+        }
 
+        val newly = ArrayList<Int>(4)
+        mark(matched, newly)
+        creditRoadUnderfoot(fix, matched, newly)
+        bridgeFromPreviousFix(matched, newly)
+        previousMatch = matched
+
+        return newly.toIntArray()
+    }
+
+    private fun mark(id: Int, into: MutableList<Int>) {
+        if (walked[id]) return
         walked[id] = true
         walkedLengthM += network.segmentLengths[id]
-        return intArrayOf(id)
+        into += id
+    }
+
+    /**
+     * Whether two segments are the same road as a walker would name it.
+     *
+     * By name where there is one, because OSM splits a street wherever its tags change
+     * and Trondheimsveien arrives as 27 ways — stopping at every one of those seams would
+     * put the holes back. By way id where there is not, which keeps unnamed roads from
+     * all counting as one.
+     */
+    private fun sameRoad(a: Int, b: Int): Boolean {
+        if (network.segments[a].wayId == network.segments[b].wayId) return true
+        val name = network.streetNameOf(a) ?: return false
+        return name == network.streetNameOf(b)
+    }
+
+    /** Credits the rest of the matched road lying within [CREDIT_RADIUS_M] of the fix. */
+    private fun creditRoadUnderfoot(fix: Fix, matched: Int, into: MutableList<Int>) {
+        val projection = network.projection
+        val point = projection.project(fix.position)
+        for (id in network.index.near(fix.position, CREDIT_RADIUS_M)) {
+            if (walked[id] || !sameRoad(id, matched)) continue
+            val segment = network.segments[id]
+            val a = projection.project(segment.a)
+            val b = projection.project(segment.b)
+            if (distanceToSegment(point, a, b) > CREDIT_RADIUS_M) continue
+            mark(id, into)
+        }
+    }
+
+    /**
+     * Credits the road between the previous fix's match and this one.
+     *
+     * Ids from one way are consecutive — [RoadNetwork] flattens each way in turn — so the
+     * span is a range, and everything in it belonging to the same road is taken. By road
+     * rather than by way: a street crossing a seam between two of its own OSM ways is the
+     * commonest place for a fix to land, and stopping at the seam left a hole there.
+     *
+     * Only when the span is short enough ([MAX_BRIDGE_M]) to be a stride rather than a
+     * teleport; anything longer is a GPS jump, a fresh start, or a second stretch of the
+     * same street on the other side of a square, and filling it in would draw a line down
+     * a road nobody walked. That cap is also what makes matching by *name* safe here.
+     */
+    private fun bridgeFromPreviousFix(matched: Int, into: MutableList<Int>) {
+        val from = previousMatch
+        if (from < 0 || from == matched || !sameRoad(from, matched)) return
+
+        val low = minOf(from, matched)
+        val high = maxOf(from, matched)
+        // Two ways of one street are usually neighbours in the list but are not promised
+        // to be, and the loop below walks the whole range. A stride is a handful of ids;
+        // anything wider is two distant stretches of a street sharing a name, which
+        // [MAX_BRIDGE_M] would reject anyway after scanning half the city to find out.
+        if (high - low > MAX_BRIDGE_SEGMENTS) return
+
+        var spanned = 0.0
+        for (id in low..high) {
+            if (!sameRoad(id, matched)) continue
+            spanned += network.segmentLengths[id]
+            if (spanned > MAX_BRIDGE_M) return
+        }
+        for (id in low..high) {
+            if (sameRoad(id, matched)) mark(id, into)
+        }
     }
 
     /**
@@ -109,7 +196,7 @@ class Coverage(private val network: RoadNetwork) {
      * Scored rather than filtered: distance, plus a penalty for pointing the wrong way.
      * A hard bearing filter was the first attempt and it under-credited badly — walking
      * with eight keyboard directions, or along any street that does not run square to
-     * them, put the heading more than 45° off the road underfoot often enough that 11%
+     * them, put the heading more than 45 deg off the road underfoot often enough that 11%
      * of fixes sitting squarely on a road matched nothing at all. The road below you not
      * lighting up is a worse failure than a crossing street occasionally doing so.
      *
@@ -195,6 +282,30 @@ class Coverage(private val network: RoadNetwork) {
          * which is the normal case now that pavements are not in the network themselves.
          */
         const val MATCH_SEARCH_RADIUS_M = 25.0
+
+        /**
+         * How much of the matched road counts as covered by one fix.
+         *
+         * Six metres, which is where the measurements put the knee. Walking five streets
+         * end to end with the keyboard: at 0 m the sprint leaves 19% of the road behind,
+         * at 6 m that is 2% for barely any extra wrong marking (0.7% to 0.9%), and wider
+         * radii buy almost no coverage while multiplying the wrong marking — 15 m costs
+         * 2.3%, and 13% once GPS noise is in play. It only ever reaches the road already
+         * chosen, so what it widens is how much of *that* road counts, never which road.
+         */
+        const val CREDIT_RADIUS_M = 6.0
+
+        /**
+         * The longest span between two fixes that still counts as having walked it.
+         *
+         * Fixes arrive 4.5 m apart at walking speed and 13.5 m apart sprinting, so this
+         * is several strides of headroom and still far short of the distance a GPS jump
+         * covers.
+         */
+        const val MAX_BRIDGE_M = 80.0
+
+        /** A cheap bound on the bridging scan; see [bridgeFromPreviousFix]. */
+        const val MAX_BRIDGE_SEGMENTS = 64
 
         /**
          * Beyond this angle you are crossing a road, not walking along it.

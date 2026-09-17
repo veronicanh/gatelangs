@@ -28,6 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import no.gatelangs.app.model.Progress
 import no.gatelangs.app.model.byNeighbourhood
+import no.gatelangs.app.model.byStreet
 import no.gatelangs.app.model.streetsIn
 
 /**
@@ -54,6 +55,12 @@ fun ProgressScreen(
     // Summing every segment is a few tens of thousands of array reads, which is cheaper
     // than the machinery needed to keep a running total correct.
     val areas = remember(coverageRevision, network) { coverage.byNeighbourhood(network) }
+    // A snapshot without place nodes still has streets, and a flat street list is a
+    // worse answer than the two-level one but a far better one than a paragraph saying
+    // there is nothing here.
+    val streetsOnly = remember(coverageRevision, network, areas.isEmpty()) {
+        if (areas.isEmpty()) coverage.byStreet(network) else emptyList()
+    }
     var openArea by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
@@ -83,16 +90,9 @@ fun ProgressScreen(
                 HorizontalDivider()
             }
 
-            if (areas.isEmpty()) {
-                item {
-                    Text(
-                        "This snapshot carries no neighbourhoods, so there is nothing to " +
-                            "break the city into yet.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
+            items(streetsOnly, key = { "street-" + it.name }) { street ->
+                ProgressRow(progress = street)
+                HorizontalDivider()
             }
 
             items(areas, key = { it.name }) { area ->

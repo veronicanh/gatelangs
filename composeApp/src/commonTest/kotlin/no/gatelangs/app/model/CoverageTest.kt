@@ -168,7 +168,8 @@ class CoverageTest {
 
     @Test
     fun `credits one road per fix`() {
-        // Standing at a junction is still one road, not two.
+        // One road, which is not the same as one segment: a fix may fill in more of the
+        // road it is on, but never a second road. These two are 3 m apart.
         val network = RoadNetwork.from(
             listOf(
                 RawWay(1L, "Langsgata", listOf(at(0.0, 0.0), at(500.0, 0.0))),
@@ -176,7 +177,103 @@ class CoverageTest {
             )
         )
         val coverage = Coverage(network)
-        assertEquals(1, coverage.record(fix(250.0, 0.0)).size, "a fix must credit exactly one road")
+
+        val credited = coverage.record(fix(250.0, 0.0))
+        assertTrue(credited.isNotEmpty(), "the road underfoot must be credited")
+        assertTrue(
+            credited.all { network.segments[it].wayId == 1L },
+            "a fix must not credit a second road",
+        )
+        assertEquals(0.0, coverage.fractionOfWay(2L), 1e-9)
+    }
+
+    @Test
+    fun `does not step over the short segments of a bendy street`() {
+        // What "pieces of road are not marked even though I am on top of it" was.
+        // Segmentize caps segments at 25 m but leaves shorter spans alone, so a street
+        // drawn with a bend every few metres is a row of 5 m segments — and a sprinting
+        // walker covers 13.5 m between fixes. Crediting only the nearest marked 40% of
+        // this street; the rest stayed grey with the marker passing straight over it.
+        val bendy = RawWay(1L, "Svingveien", (0..40).map { at(it * 5.0, 0.0) })
+        val coverage = Coverage(RoadNetwork.from(listOf(bendy)))
+
+        var t = 0L
+        var east = 0.0
+        while (east <= 205.0) { // past the far end, so the tail is not what is measured
+            coverage.record(fix(east, 0.0, t = t))
+            east += 13.5
+            t += 250
+        }
+
+        assertTrue(
+            coverage.fractionOfWay(1L) > 0.99,
+            "segments were stepped over, got ${coverage.fractionOfWay(1L)}",
+        )
+    }
+
+    @Test
+    fun `does not bridge across a jump`() {
+        // The other side of it: two fixes far apart are not one stride, and the road
+        // between them was not walked.
+        val coverage = Coverage(oneStreet())
+        coverage.record(fix(0.0, 0.0, t = 0))
+        coverage.record(fix(450.0, 0.0, t = 1_000))
+
+        assertTrue(
+            coverage.fractionOfWay(1L) < 0.5,
+            "a 450 m jump must not credit the street in between, got ${coverage.fractionOfWay(1L)}",
+        )
+    }
+
+    @Test
+    fun `fills in the road underfoot without reaching the next street`() {
+        // Leniency is allowed to widen how much of the matched road counts. It is not
+        // allowed to reach a different road, however close: Nordgata is 8 m away.
+        val network = RoadNetwork.from(
+            listOf(
+                RawWay(1L, "Sorgata", listOf(at(0.0, 0.0), at(500.0, 0.0))),
+                RawWay(2L, "Nordgata", listOf(at(0.0, 8.0), at(500.0, 8.0))),
+            )
+        )
+        val coverage = Coverage(network)
+        var t = 0L
+        var east = 0.0
+        while (east <= 500.0) {
+            coverage.record(fix(east, 0.0, t = t))
+            east += 13.5 // sprinting, the speed that used to leave holes
+            t += 250
+        }
+
+        assertTrue(
+            coverage.fractionOfWay(1L) > 0.99,
+            "the street walked should be complete, got ${coverage.fractionOfWay(1L)}",
+        )
+        assertEquals(0.0, coverage.fractionOfWay(2L), 1e-9, "the street 8 m away was not walked")
+    }
+
+    @Test
+    fun `bridges the seam between two ways of one street`() {
+        // OSM splits a street wherever its tags change, so a walk down Parkveien crosses
+        // from one way to the next mid-stride. The seam is not a place to leave a hole.
+        val network = RoadNetwork.from(
+            listOf(
+                RawWay(1L, "Parkveien", listOf(at(0.0, 0.0), at(200.0, 0.0))),
+                RawWay(2L, "Parkveien", listOf(at(200.0, 0.0), at(400.0, 0.0))),
+            )
+        )
+        val coverage = Coverage(network)
+        var t = 0L
+        var east = 0.0
+        while (east <= 400.0) {
+            coverage.record(fix(east, 0.0, t = t))
+            east += 13.5
+            t += 250
+        }
+
+        assertTrue(
+            coverage.fractionOfStreet("Parkveien") > 0.99,
+            "the seam left a hole, got ${coverage.fractionOfStreet("Parkveien")}",
+        )
     }
 
     @Test

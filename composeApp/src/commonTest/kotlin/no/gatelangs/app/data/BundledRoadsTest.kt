@@ -22,15 +22,35 @@ class BundledRoadsTest {
     fun `loads the committed Oslo snapshot`() = runTest {
         val network = repository().loadBundled()
 
-        assertTrue(network.segments.size > 5_000, "only ${network.segments.size} segments")
+        assertTrue(network.segments.size > 1_500, "only ${network.segments.size} segments")
+        assertTrue(network.totalLengthM > 40_000.0, "only ${network.totalLengthM / 1000} km of road")
+        assertTrue(network.segmentsByWay.size > 500, "only ${network.segmentsByWay.size} ways")
+    }
+
+    @Test
+    fun `nearly every street in the snapshot has a name`() = runTest {
+        // Streets-only is what makes this true. When footways were in the set, 29% of the
+        // length carried a name and a per-street percentage meant nothing; if this drops
+        // back it means pavement geometry has crept into the snapshot again.
+        val network = repository().loadBundled()
+        val named = network.streetNames.values.count { !it.isNullOrBlank() }
+        val share = named.toDouble() / network.streetNames.size
+        assertTrue(share > 0.85, "only ${(share * 100).toInt()}% of ways are named")
+    }
+
+    @Test
+    fun `the snapshot carries the places to group progress by`() = runTest {
+        // The progress screen breaks the city into strøk, and they travel in the same
+        // file as the roads. A snapshot without them silently degrades to a flat list of
+        // every street in Oslo.
+        val network = repository().loadBundled()
         assertTrue(
-            network.totalLengthM in 150_000.0..250_000.0,
-            "implausible total length: ${network.totalLengthM / 1000} km",
+            network.neighbourhoods.size >= 10,
+            "only ${network.neighbourhoods.size} neighbourhoods in the snapshot",
         )
-        assertTrue(network.segmentsByWay.size > 1_000, "only ${network.segmentsByWay.size} ways")
         assertTrue(
-            network.streetNames.values.count { !it.isNullOrBlank() } > 300,
-            "suspiciously few named streets",
+            network.neighbourhoods.all { it.centre in network.bounds },
+            "a neighbourhood sits outside the roads it is meant to group",
         )
     }
 

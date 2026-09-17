@@ -218,8 +218,14 @@ data class DistrictGroup(
      * [streets] is then just those, and the row must say so rather than offer a chevron.
      */
     val expandedByQuery: Boolean,
-    /** How many streets the bydel has in total, for "3 av 42 gater matcher «park»". */
+    /**
+     * Named streets in the bydel before any narrowing — the denominator for both the tally
+     * on the row and the "3 av 42 gater matcher" line. Counted before the filter on purpose:
+     * "hvor mange gater er her" must not change because you ticked "skjul fullførte".
+     */
     val totalStreets: Int,
+    /** How many of those are walked end to end. */
+    val finishedStreets: Int,
 )
 
 /**
@@ -243,23 +249,22 @@ fun arrangeDistricts(
     val order = view.sort.comparator()
     return districts
         .mapNotNull { district ->
-            val streets = streetsByDistrict[district.name].orEmpty().filter(view.filter::accepts)
+            val all = streetsByDistrict[district.name].orEmpty()
+            val named = all.namedStreets()
+            val streets = all.filter(view.filter::accepts)
             val hits = if (folded.isEmpty()) emptyList() else streets.filter { it.matches(folded) }
-            when {
-                hits.isNotEmpty() -> DistrictGroup(
-                    district = district,
-                    streets = hits.sortedWith(order),
-                    expandedByQuery = true,
-                    totalStreets = streets.size,
-                )
-                district.matches(folded) && view.filter.accepts(district) -> DistrictGroup(
-                    district = district,
-                    streets = streets.sortedWith(order),
-                    expandedByQuery = false,
-                    totalStreets = streets.size,
-                )
-                else -> null
+            val shown = when {
+                hits.isNotEmpty() -> hits
+                district.matches(folded) && view.filter.accepts(district) -> streets
+                else -> return@mapNotNull null
             }
+            DistrictGroup(
+                district = district,
+                streets = shown.sortedWith(order),
+                expandedByQuery = hits.isNotEmpty(),
+                totalStreets = named.size,
+                finishedStreets = named.count { it.isFinished },
+            )
         }
         .sortedWith(compareBy(order) { it.district })
 }

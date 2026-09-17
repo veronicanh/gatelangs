@@ -91,15 +91,15 @@ data class MapColors(
 )
 
 private val LightMapColors = MapColors(
-    walked = Color(0xFF6B6F76),
-    unwalked = Color(0xFFC2620A),
+    walked = Color(0xFF515A53),
+    unwalked = Color(0xFF17874B),
     currentPosition = Color(0xFF0B64D6),
     positionHalo = Color(0x330B64D6),
 )
 
 private val DarkMapColors = MapColors(
-    walked = Color(0xFF8C9199),
-    unwalked = Color(0xFFFFBE3D),
+    walked = Color(0xFF515A53),
+    unwalked = Color(0xFF17874B),
     currentPosition = Color(0xFF63A8FF),
     positionHalo = Color(0x3363A8FF),
 )

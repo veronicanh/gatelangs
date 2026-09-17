@@ -17,5 +17,9 @@ internal fun Double.toTenths(): String {
 /** A fraction in 0..1, as the percentage the screens print. */
 internal fun percentOf(fraction: Double): String = "${(fraction * 100).toTenths()} %"
 
-/** Metres, as the kilometres the screens print. */
-internal fun kmOf(meters: Double): String = "${(meters / 1000).toTenths()} km"
+/** Metres, as the kilometres the screens print. Includes "km" */
+internal fun labeledKmOf(meters: Double): String = "${(meters / 1000).toTenths()} km"
+
+/** Metres, as the kilometres the screens print. Without "km" */
+internal fun kmOf(meters: Double): String = (meters / 1000).toTenths()
+

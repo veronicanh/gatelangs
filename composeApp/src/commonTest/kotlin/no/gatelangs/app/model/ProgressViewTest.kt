@@ -247,7 +247,30 @@ class DistrictSearchTest {
         val vest = groups.single()
         assertEquals("Vest", vest.district.name)
         assertFalse(vest.expandedByQuery, "a name hit should keep its chevron")
-        assertEquals(vest.totalStreets, vest.streets.size)
+        assertEquals(
+            coverage.streetsByDistrict(network).getValue("Vest").size,
+            vest.streets.size,
+            "a name hit has no subset to show, so it keeps the whole bydel",
+        )
+    }
+
+    @Test
+    fun `the tally on a bydel row counts named streets only, and ignores the filter`() {
+        // "hvor mange gater er her" must not change because you ticked "skjul fullførte" —
+        // and the nameless bucket is not a street, so it is in neither half of the ratio.
+        val (coverage, network) = freshTown()
+        coverage.restore(network.segmentsByStreet.getValue("Sidegata"))
+
+        for (filter in ProgressFilter.entries) {
+            val vest = arrangeDistricts(
+                districts = coverage.byDistrict(network),
+                streetsByDistrict = coverage.streetsByDistrict(network),
+                view = ProgressView(filter = filter),
+            ).single { it.district.name == "Vest" }
+
+            assertEquals(2, vest.totalStreets, "Parkveien and Sidegata, not the nameless rest")
+            assertEquals(1, vest.finishedStreets, "only Sidegata has been walked end to end")
+        }
     }
 
     @Test

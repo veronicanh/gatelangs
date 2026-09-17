@@ -6,7 +6,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,6 +27,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -44,7 +44,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -69,7 +68,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import no.gatelangs.app.model.DistrictGroup
 import no.gatelangs.app.model.Grouping
 import no.gatelangs.app.model.Progress
@@ -97,13 +95,12 @@ import kotlin.math.roundToInt
  * divides itself into, each opening into the streets inside it. By street is "how is
  * Parkveien doing" — every street in the snapshot in one ranking.
  *
- * The chrome is arranged around one number: how much of the screen is left for the list.
- * At 360×600 — which is what a phone browser gives you, since `index.html` turns off
- * zooming — a row is 71dp, so every pinned control costs most of a row. Only the search box
- * and the line that says what the search did are pinned; the summary, the switch and the
- * sort chips are all the first three items of the list itself and scroll away, because
- * choosing a sort is something you do once and reading the results is something you do all
- * the way down.
+ * The chrome is arranged around one number: how much of the screen is left for the list. At
+ * 360×600 — which is what a phone browser gives you, since `index.html` turns off zooming —
+ * a row is 71dp, so anything pinned costs most of a row. Two things are: the title bar at the
+ * top and the search box at the bottom. The summary, the switch and the sort chips are the
+ * first three items of the list itself and scroll away, which is what keeps six streets on
+ * screen at once; reading a ranking you can only see three rows of is not reading a ranking.
  */
 @Composable
 fun ProgressScreen(
@@ -179,7 +176,6 @@ fun ProgressScreen(
     val headerItems = 1 + (if (canGroupByDistrict) 1 else 0) + 1
 
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
     val currentRows by rememberUpdatedState(bodyRows)
 
     LaunchedEffect(focus, headerItems) {
@@ -206,41 +202,36 @@ fun ProgressScreen(
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(
+            // The same tonal button that opens this screen from the map, so the way back
+            // looks like the way in rather than like a stray piece of text.
+            FilledTonalButton(
                 onClick = viewModel::showMap,
                 modifier = Modifier.pointerHoverIcon(PointerIcon.Hand),
             ) { Text("‹  Kart") }
-            SearchField(
-                query = query,
-                onQuery = { query = it },
-                modifier = Modifier.weight(1f),
+            Text(
+                "Detaljer om fremgang",
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 12.dp),
             )
         }
 
-        ResultLine(
-            count = bodyRows.count { it.kind != BodyRow.Kind.SHOW_ALL && it.kind != BodyRow.Kind.CHILD },
-            childCount = bodyRows.count { it.kind == BodyRow.Kind.CHILD },
-            query = query,
-            grouping = grouping,
-            view = view,
-            onScrollToControls = { scope.launch { listState.animateScrollToItem(0) } },
-        )
-
         HorizontalDivider()
 
-        LazyColumn(Modifier.fillMaxSize(), state = listState) {
+        LazyColumn(Modifier.weight(1f), state = listState) {
             item("summary") {
                 val named = streets.namedStreets()
-                TotalCard(
+                TotalSummary(
                     walkedM = coverage.walkedLengthMeters(),
                     totalM = network.totalLengthM,
                     finished = named.count { it.isFinished },
                     of = named.size,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 )
+                HorizontalDivider()
             }
 
             if (canGroupByDistrict) {
@@ -248,7 +239,7 @@ fun ProgressScreen(
                     GroupingToggle(
                         selected = grouping,
                         onSelect = { view = view.groupedBy(it) },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
             }
@@ -292,6 +283,14 @@ fun ProgressScreen(
                 }
             }
         }
+
+        HorizontalDivider()
+
+        SearchField(
+            query = query,
+            onQuery = { query = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
 }
 
@@ -312,6 +311,7 @@ private data class BodyRow(
     val expandable: Boolean = true,
     val matchCount: Int = 0,
     val totalStreets: Int = 0,
+    val finishedStreets: Int = 0,
     /** Carries the rule off the bottom of an expanded group, so bydeler stay separated. */
     val lastInGroup: Boolean = false,
 ) {
@@ -341,6 +341,7 @@ private fun buildBodyRows(
                 expandable = !group.expandedByQuery,
                 matchCount = if (group.expandedByQuery) group.streets.size else 0,
                 totalStreets = group.totalStreets,
+                finishedStreets = group.finishedStreets,
             )
         )
         if (!open) continue
@@ -371,14 +372,18 @@ private fun buildBodyRows(
 }
 
 /**
- * The one control pinned all the way down the list.
+ * The box that narrows whichever list is on show.
  *
- * Sharing the row with the back button rather than taking a row of its own is what keeps the
- * permanent chrome to one line: the back button already costs its height, and the field takes
- * the width that was going spare. Not `SearchBar`, which is still an experimental API and
- * wants to own the screen with a results surface of its own — a much bigger thing than a box
- * that narrows a list already on show. Outlined rather than filled because the filled
- * variant's container is `surfaceContainerHighest`, a role this theme does not set.
+ * Pinned to the bottom edge rather than placed in the list. Two reasons, and the second is
+ * the one that decides it: a search box you have to scroll to is no use from row ninety, and
+ * the bottom of the screen is where a thumb already is — the same reasoning that moved
+ * address bars down in mobile browsers. It also puts the field next to the keyboard that
+ * opens under it rather than a screen away from it.
+ *
+ * Not `SearchBar`, which is still an experimental API and wants to own the screen with a
+ * results surface of its own — a much bigger thing than a box that narrows a list already
+ * visible. Outlined rather than filled because the filled variant's container is
+ * `surfaceContainerHighest`, a role this theme does not set.
  *
  * Deliberately not focused on arrival: in a browser that raises the keyboard over half the
  * viewport before a single row has been seen, and on desktop it takes the arrow keys away
@@ -406,7 +411,7 @@ private fun SearchField(
         },
         singleLine = true,
         shape = RoundedCornerShape(50),
-        placeholder = { Text("Søk etter gate eller bydel", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        placeholder = { Text("Søk etter gate", maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
         trailingIcon = if (query.isEmpty()) {
             null
@@ -424,73 +429,14 @@ private fun SearchField(
 }
 
 /**
- * What the search did, and what order the list is in.
+ * The city's own row, sitting where a row would sit.
  *
- * Pinned next to the field rather than left to scroll, because it is the feedback loop for
- * what you are typing and you look at where you typed. At rest it is a plain count; the
- * ratio only appears once something has been narrowed, since "149 gater" is not news.
- *
- * The sort readout is here because the chips themselves scroll away — you should never have
- * to wonder why the list is in this order — and tapping it brings them back.
- */
-@Composable
-private fun ResultLine(
-    count: Int,
-    childCount: Int,
-    query: String,
-    grouping: Grouping,
-    view: ProgressView,
-    onScrollToControls: () -> Unit,
-) {
-    val noun = if (grouping == Grouping.DISTRICT) {
-        if (count == 1) "bydel" else "bydeler"
-    } else {
-        if (count == 1) "gate" else "gater"
-    }
-    val label = when {
-        query.isBlank() -> "$count $noun"
-        // A bydel search hits two kinds of thing at once, so it has to report both or the
-        // number will not match what is on screen.
-        grouping == Grouping.DISTRICT -> "$count $noun · $childCount gater"
-        else -> "$count treff"
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(
-            onClick = onScrollToControls,
-            modifier = Modifier.pointerHoverIcon(PointerIcon.Hand),
-        ) {
-            val arrow = if (view.sort.key.needsArrow) {
-                if (view.sort.descending) " ↓" else " ↑"
-            } else {
-                ""
-            }
-            Text(
-                view.sort.key.labelFor(view.sort.descending) + arrow,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-/**
- * The headline, and the one place on this screen that borrows a colour from the map.
- *
- * A [Surface] with tonal elevation rather than a `Card`: Material's card container is
- * `surfaceContainerLow`, a role this theme never sets, so it arrives from the stock baseline
- * as a lavender-black belonging to no part of this app. Tonal elevation derives from
- * `surface` and `primary`, both of which are ours. Same 14dp corner as the cards on the map.
+ * Built to the same measurements as [ProgressRow] rather than as a card: a panel with its own
+ * padding, corner and elevation announced itself as a different kind of object and cost most
+ * of a screenful doing it. The only thing that separates it from the streets underneath is
+ * the weight of its first line and the colour of its track — which is the map's amber, the
+ * one place on this screen that borrows it, because the empty half of this bar is the part of
+ * the city still to walk.
  *
  * Nothing here is ever time-based. Coverage is a `BooleanArray` with no timestamps, so
  * "+2,3 km denne uken", streaks and "ferdig om åtte måneder" are not merely missing, they are
@@ -498,7 +444,7 @@ private fun ResultLine(
  * whole job is to be believed.
  */
 @Composable
-private fun TotalCard(
+private fun TotalSummary(
     walkedM: Double,
     totalM: Double,
     finished: Int,
@@ -506,57 +452,48 @@ private fun TotalCard(
     modifier: Modifier = Modifier,
 ) {
     val fraction = if (totalM <= 0.0) 0.0 else walkedM / totalM
-    val outstanding = LocalMapColors.current.unwalked
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        tonalElevation = 3.dp,
-        modifier = modifier.fillMaxWidth(),
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text(
-                "Detaljer om fremgang",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(percentOf(fraction), style = MaterialTheme.typography.headlineMedium)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "$finished av $of gater ferdig",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            LinearProgressIndicator(
-                progress = { fraction.toFloat() },
-                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-                // The track is the road still to walk, so it is the map's amber, quietened.
-                // This is the one bar on the screen big enough to carry it.
-                trackColor = outstanding.copy(alpha = 0.30f),
-                drawStopIndicator = {},
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "${kmOf(walkedM)} gått",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    // What is left, not what is done: the number that tells you whether to put
-                    // your shoes on, in the colour the map paints road still to walk. Nothing
-                    // else here is amber, which is what keeps it meaning that.
-                    "${kmOf(totalM - walkedM)} igjen",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = outstanding,
-                )
-            }
-        }
+        Text(
+            "${percentOf(fraction)} av byen gått",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        LinearProgressIndicator(
+            progress = { fraction.toFloat() },
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)),
+            trackColor = LocalMapColors.current.unwalked.copy(alpha = 0.30f),
+            drawStopIndicator = {},
+        )
+        Text(
+            if (walkedM == totalM) {
+                "Gått ${labeledKmOf(totalM)}"
+            } else {
+                "Gått ${kmOf(walkedM)} av ${labeledKmOf(totalM)} · ${labeledKmOf(totalM - walkedM)} gjenstår"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            tallyLine(finished, of),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
+
+/**
+ * "38 av 149 gater fullført".
+ *
+ * Kilometres and streets are two different answers to "how far have I come", and they come
+ * apart: half-walking every arterial in Oslo is a lot of kilometres and no finished streets.
+ * The nameless bucket is in neither half of the ratio — it stands in for two dozen unnamed
+ * ways, so it would both pad the denominator and never be completable.
+ */
+private fun tallyLine(finished: Int, of: Int): String = "$finished av $of gater fullført"
 
 /**
  * A two-way switch built out of [Surface] rather than `SegmentedButton`.
@@ -583,13 +520,17 @@ private fun GroupingToggle(
                 onClick = { onSelect(option) },
                 modifier = Modifier.weight(1f).pointerHoverIcon(PointerIcon.Hand),
                 shape = pill,
+                // `primary` rather than a container role. The containers are all tuned to
+                // sit quietly on the background, which is exactly wrong here: against the
+                // `surfaceVariant` trough a selected container half differs by a few points
+                // of luminance and reads as "neither half is chosen".
                 color = if (isSelected) {
-                    MaterialTheme.colorScheme.secondaryContainer
+                    MaterialTheme.colorScheme.primary
                 } else {
                     MaterialTheme.colorScheme.surfaceVariant
                 },
                 contentColor = if (isSelected) {
-                    MaterialTheme.colorScheme.onSecondaryContainer
+                    MaterialTheme.colorScheme.onPrimary
                 } else {
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
@@ -738,6 +679,7 @@ private fun BreakdownRow(
                     Modifier
                 },
                 expanded = if (row.expandable) row.expanded else null,
+                tally = tallyLine(row.finishedStreets, row.totalStreets),
                 // The line that makes the parent's numbers and the visible children
                 // reconcile. Without it, three streets under a bydel that says 10,9 km totalt
                 // invites you to conclude the bydel has three streets.
@@ -802,9 +744,11 @@ private fun ProgressRow(
     indented: Boolean = false,
     /** Null when the row does not expand; otherwise which way the chevron points. */
     expanded: Boolean? = null,
+    /** "12 av 42 gater fullført" — bydel rows only; a street cannot be made of streets. */
+    tally: String? = null,
     note: String? = null,
 ) {
-    val spoken = remember(progress, note) { spokenRow(progress, note) }
+    val spoken = remember(progress, tally, note) { spokenRow(progress, tally, note) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -820,22 +764,26 @@ private fun ProgressRow(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            Text(
+                percentOf(progress.fraction),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 8.dp),
+            )
             if (expanded != null) {
                 Icon(
+                    // Outside the number rather than in front of it: the percentages are what
+                    // you read down the column, and a chevron between the name and the figure
+                    // pushes every one of them to a different place on the line.
+                    //
                     // An icon rather than the "▾"/"▸" characters this used to draw: those go
                     // through font fallback, and a browser on wasm is exactly where fallback
                     // is least predictable.
                     imageVector = if (expanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowRight,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 8.dp).size(18.dp),
+                    modifier = Modifier.padding(start = 4.dp).size(18.dp),
                 )
             }
-            Text(
-                percentOf(progress.fraction),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 8.dp),
-            )
         }
         LinearProgressIndicator(
             progress = { progress.fraction.toFloat() },
@@ -851,15 +799,17 @@ private fun ProgressRow(
             drawStopIndicator = {},
         )
         Text(
-            // What is left, not what is done: it is the number that tells you whether to put
-            // your shoes on.
-            "${kmOf(progress.remainingM)} igjen  ·  ${kmOf(progress.totalM)} totalt",
+            if (progress.remainingM == 0.0) {
+                "Gått ${labeledKmOf(progress.totalM)}"
+            } else {
+                "Gått ${kmOf(progress.totalM - progress.remainingM)} av ${labeledKmOf(progress.totalM)} · ${labeledKmOf(progress.remainingM)} gjenstår"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (note != null) {
+        for (line in listOfNotNull(tally, note)) {
             Text(
-                note,
+                line,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -875,17 +825,17 @@ private fun ProgressRow(
  * percentage is rounded to a whole number here because a screen reader saying "førtito komma
  * én prosent" for every row in a list of a hundred and fifty is noise, not precision.
  */
-private fun spokenRow(progress: Progress, note: String?): String = buildString {
+private fun spokenRow(progress: Progress, tally: String?, note: String?): String = buildString {
     append(progress.name)
     append(", ")
     append((progress.fraction * 100).roundToInt())
     append(" prosent gått, ")
-    append(kmOf(progress.remainingM).replace(" km", " kilometer"))
+    append(labeledKmOf(progress.remainingM).replace(" km", " kilometer"))
     append(" igjen av ")
-    append(kmOf(progress.totalM).replace(" km", " kilometer"))
-    if (note != null) {
+    append(labeledKmOf(progress.totalM).replace(" km", " kilometer"))
+    for (line in listOfNotNull(tally, note)) {
         append(". ")
-        append(note)
+        append(line)
     }
 }
 

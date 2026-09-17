@@ -335,7 +335,7 @@ private fun CoveragePanel(viewModel: MapViewModel, state: LoadState.Ready, cover
             ) {
                 // Tonal rather than filled: the card is a readout, and the one thing on
                 // this screen that should look like the primary action is Start å gå.
-                Text("Detaljer om fremgang  ›")
+                Text("Detaljer  ›")
             }
         }
     }

@@ -1,0 +1,26 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Kotlin
+.kotlin/
+kotlin-js-store/
+
+# Local config — machine specific, never commit
+local.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.fleet/
+
+# Xcode
+xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# OS
+.DS_Store

@@ -29,7 +29,7 @@ actual fun createRealLocationSource(): LocationSource? =
  */
 private class BrowserLocationSource : LocationSource {
 
-    override val label: String = "Browser GPS"
+    override val label: String = "GPS i nettleseren"
 
     override fun fixes(): Flow<Fix> = flow {
         val watchId = startGeolocationWatch()

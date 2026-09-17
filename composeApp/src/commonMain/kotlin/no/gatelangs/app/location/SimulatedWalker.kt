@@ -56,7 +56,7 @@ class SimulatedWalker(
     seed: Int = 20260917,
 ) : LocationSource {
 
-    override val label: String = "Simulated walker"
+    override val label: String = "Simulert tur"
 
     private val random = Random(seed)
 

@@ -1,7 +1,7 @@
 package no.gatelangs.app.model
 
 /** Streets with no name in OSM, gathered into one row so the totals still add up. */
-const val UNNAMED_ROADS = "Unnamed roads"
+const val UNNAMED_ROADS = "Gater uten navn"
 
 /** One row of the breakdown: something with a name, and how much of it has been walked. */
 data class Progress(
@@ -24,7 +24,7 @@ data class Progress(
 private val MOST_COMPLETE = compareByDescending<Progress> { it.fraction }
     .thenByDescending { it.totalM }
 
-private fun Coverage.progressOf(network: RoadNetwork, name: String, ids: IntArray) =
+internal fun Coverage.progressOf(network: RoadNetwork, name: String, ids: IntArray) =
     Progress(name = name, walkedM = walkedLengthOf(ids), totalM = network.lengthOf(ids))
 
 /** Progress for each bydel in the network. */

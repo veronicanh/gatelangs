@@ -49,6 +49,20 @@ class CoverageTest {
     }
 
     @Test
+    fun `remembers the segment the last fix matched`() {
+        val network = oneStreet()
+        val coverage = Coverage(network)
+
+        coverage.record(fix(250.0, 0.0))
+        val matched = coverage.currentSegment
+        assertTrue(matched >= 0, "a fix on the street must have matched something")
+        assertEquals("Testgata", network.streetNameOf(matched))
+
+        coverage.record(fix(250.0, 400.0))
+        assertEquals(-1, coverage.currentSegment, "stepping off the network clears the match")
+    }
+
+    @Test
     fun `ignores a fix far from any road`() {
         val coverage = Coverage(oneStreet())
         assertEquals(0, coverage.record(fix(250.0, 400.0)).size)

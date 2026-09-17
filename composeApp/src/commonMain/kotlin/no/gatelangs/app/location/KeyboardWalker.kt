@@ -35,7 +35,7 @@ class KeyboardWalker(
     private val accuracyM: Double = 6.0,
 ) : LocationSource {
 
-    override val label: String = "WASD / arrows  ·  shift to sprint"
+    override val label: String = "WASD / piltaster  ·  shift for å løpe"
 
     /**
      * Which directions are currently held.

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -19,6 +20,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,8 +38,8 @@ import no.gatelangs.app.model.streetsIn
 
 /** The two ways of slicing the same coverage. */
 private enum class Grouping(val label: String) {
-    DISTRICT("By bydel"),
-    STREET("By street"),
+    DISTRICT("Etter bydel"),
+    STREET("Etter gate"),
 }
 
 /**
@@ -70,8 +72,24 @@ fun ProgressScreen(
     // A snapshot with no district outlines has nothing to group by, so there is nothing
     // to switch between either: the switch disappears rather than offering an empty half.
     val canGroupByDistrict = districts.isNotEmpty()
+
+    // Opened from the map's readout, this screen should land on the thing that was tapped.
+    // Seeded into the remembered state rather than pushed in by an effect, which would
+    // render the wrong half for one frame and then swap it; the whole composition is
+    // discarded when the screen closes, so these initialisers run again on every entry.
+    //
+    // DEAD-CODE(progress-deep-link) — `focus` is always null as of 2026-09-17, so every
+    // use of it below falls through to the behaviour this screen had before it existed.
+    // See ProgressFocus in MapViewModel.kt for why it is still here and when to delete it.
+    val focus = viewModel.progressFocus
     var grouping by remember(canGroupByDistrict) {
-        mutableStateOf(if (canGroupByDistrict) Grouping.DISTRICT else Grouping.STREET)
+        mutableStateOf(
+            when {
+                !canGroupByDistrict -> Grouping.STREET
+                focus?.street != null -> Grouping.STREET
+                else -> Grouping.DISTRICT
+            }
+        )
     }
 
     // Built only for the half on show. Every street in Oslo is a long list to sort, and
@@ -79,16 +97,38 @@ fun ProgressScreen(
     val streets = remember(coverageRevision, network, grouping) {
         if (grouping == Grouping.STREET) coverage.byStreet(network) else emptyList()
     }
-    var openDistrict by remember { mutableStateOf<String?>(null) }
+    // DEAD-CODE(progress-deep-link): the initial value is always null.
+    var openDistrict by remember { mutableStateOf(focus?.district) }
+
+    // Every named street in the snapshot, ranked by completion, is a list the street you
+    // are standing on sits somewhere in the middle of. Highlighting it without scrolling
+    // to it would be no help at all.
+    //
+    // DEAD-CODE(progress-deep-link): `focusStreet` is always null, so the effect below
+    // returns immediately and the list simply opens at the top. `listState` itself is not
+    // dead — a LazyColumn wants one either way.
+    val listState = rememberLazyListState()
+    val focusStreet = focus?.street
+    LaunchedEffect(focusStreet) {
+        val name = focusStreet ?: return@LaunchedEffect
+        val index = streets.indexOfFirst { it.name == name }
+        // Keyed on the name alone, never on `streets`: tracking carries on while this
+        // screen is open, so that list is a new object every few seconds and keying on it
+        // would yank the view back to the focused street again and again.
+        //
+        // Not animated — a jump across thousands of rows is a blur, not an animation.
+        // The +1 is the "Totalt" header, which is a lazy item of its own.
+        if (index >= 0) listState.scrollToItem(index + 1)
+    }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = viewModel::showMap) { Text("‹  Map") }
+            TextButton(onClick = viewModel::showMap) { Text("‹  Kart") }
             Text(
-                "Progress",
+                "Detaljer om fremgang",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(start = 4.dp),
             )
@@ -104,11 +144,11 @@ fun ProgressScreen(
 
         HorizontalDivider()
 
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState) {
             item {
                 ProgressRow(
                     progress = Progress(
-                        name = "All of it",
+                        name = "Totalt",
                         walkedM = coverage.walkedLengthMeters(),
                         totalM = network.totalLengthM,
                     ),
@@ -118,7 +158,20 @@ fun ProgressScreen(
             }
 
             items(streets, key = { "street-" + it.name }) { street ->
-                ProgressRow(progress = street)
+                // Marks where the scroll landed. Without it you arrive at the right place
+                // with no idea which of the rows on screen you asked for.
+                //
+                // DEAD-CODE(progress-deep-link): always false today.
+                val focused = street.name == focusStreet
+                ProgressRow(
+                    progress = street,
+                    modifier = if (focused) {
+                        Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                    } else {
+                        Modifier
+                    },
+                    emphasis = focused,
+                )
                 HorizontalDivider()
             }
 
@@ -234,12 +287,15 @@ private fun ProgressRow(
         LinearProgressIndicator(
             progress = { progress.fraction.toFloat() },
             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)),
+            // Material draws a dot at the far end of the track by default. On a screen
+            // that is mostly a stack of these, it reads as a column of stray marks.
+            drawStopIndicator = {},
         )
         Text(
             // What is left, not what is done: it is the number that tells you whether to
             // put your shoes on.
-            "${(progress.remainingM / 1000).toTenths()} km to go  ·  " +
-                "${(progress.totalM / 1000).toTenths()} km in all",
+            "${(progress.remainingM / 1000).toTenths()} km igjen  ·  " +
+                "${(progress.totalM / 1000).toTenths()} km totalt",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

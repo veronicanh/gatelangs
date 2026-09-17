@@ -25,23 +25,39 @@ import no.gatelangs.app.location.WalkDirection
  * around the controls instead of walking down a street. Previewing from the top catches
  * them wherever focus has ended up, and consuming them stops the default behaviour.
  *
+ * [active] is whether the keys should be walking at all. This node wraps every screen, so
+ * without it the progress list could not be arrow-scrolled — the walker would eat the keys
+ * and stroll off down a street while you read. Going inactive also releases whatever is
+ * held down, because the matching key-up will not be delivered here to do it.
+ *
  * [refocusOn] re-takes focus whenever it changes — pass whatever means "the user just
- * clicked a control", so the keys keep working afterwards.
+ * clicked a control", so the keys keep working afterwards. Clicking anything at all moves
+ * focus onto it, so anything clickable belongs in that value.
  */
 @Composable
-fun Modifier.walkerKeyControls(walker: KeyboardWalker?, refocusOn: Any?): Modifier {
+fun Modifier.walkerKeyControls(
+    walker: KeyboardWalker?,
+    active: Boolean,
+    refocusOn: Any?,
+): Modifier {
     val focusRequester = remember { FocusRequester() }
 
-    LaunchedEffect(refocusOn) {
-        // Throws if the node is not attached yet, which is not worth crashing over: the
-        // user can click the map and carry on.
-        runCatching { focusRequester.requestFocus() }
+    LaunchedEffect(active, refocusOn, walker) {
+        if (active) {
+            // Throws if the node is not attached yet, which is not worth crashing over:
+            // the user can click the map and carry on.
+            runCatching { focusRequester.requestFocus() }
+        } else {
+            // Leaving with a key down would otherwise latch it: the key-up lands while
+            // this is inactive, is passed straight through, and the walker keeps going.
+            walker?.releaseAll()
+        }
     }
 
     return this
         .focusRequester(focusRequester)
         .focusable()
-        .onPreviewKeyEvent { event -> handleWalkKey(walker, event) }
+        .onPreviewKeyEvent { event -> active && handleWalkKey(walker, event) }
 }
 
 /** Returns whether the event was ours, which is what stops it being handled again. */

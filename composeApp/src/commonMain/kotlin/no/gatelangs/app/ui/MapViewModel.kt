@@ -22,6 +22,8 @@ import no.gatelangs.app.model.Achievement
 import no.gatelangs.app.model.Coverage
 import no.gatelangs.app.model.Milestones
 import no.gatelangs.app.model.RoadNetwork
+import no.gatelangs.app.model.Whereabouts
+import no.gatelangs.app.model.whereabouts
 import no.gatelangs.app.storage.Storage
 import no.gatelangs.app.storage.WalkedCodec
 import kotlin.time.Duration.Companion.milliseconds
@@ -36,6 +38,29 @@ import kotlin.time.TimeSource
  * stack or a route type — this is the whole of it.
  */
 enum class Screen { MAP, PROGRESS }
+
+/**
+ * Where the progress screen should land when it is opened from the map.
+ *
+ * Tapping the bydel or the street you are standing on should open the breakdown *at* it
+ * rather than at the top of a list of thousands. One nullable field rather than a route
+ * type: there are two screens and one edge between them, and that has not changed.
+ *
+ * DEAD-CODE(progress-deep-link) — nothing constructs this as of 2026-09-17.
+ *
+ * The map card's "Bydel:" and "Gate:" lines were the only things that ever did, and they
+ * were deliberately made non-interactive; the card is now a readout with a single button
+ * that opens the breakdown at the top. Everything tagged `progress-deep-link` is therefore
+ * unreachable: [progressFocus] is permanently null, [showProgress] with an argument is
+ * never called, and ProgressScreen's seeding, scroll-to-street and row highlight all fall
+ * through to the behaviour they had before any of it existed. It is inert, not harmful.
+ *
+ * Kept only because a future entry point — a search box, a tap on the map, a row in some
+ * other list — would want exactly this. **If no such entry point has been built by the
+ * time you next touch this file, delete every `progress-deep-link` site instead of
+ * maintaining them:** `grep -rn progress-deep-link composeApp/src`.
+ */
+data class ProgressFocus(val district: String? = null, val street: String? = null)
 
 /** What the map screen is currently doing. */
 sealed interface LoadState {
@@ -74,6 +99,23 @@ class MapViewModel : ViewModel() {
     var followPosition: Boolean by mutableStateOf(true)
 
     var locationLabel: String by mutableStateOf("")
+        private set
+
+    /**
+     * Where the walker is now. Null when off the road network, or when not tracking.
+     *
+     * Names only — see [Whereabouts]. The percentages behind them are worked out where
+     * they are drawn, because they only move when new road is credited.
+     */
+    var whereabouts: Whereabouts? by mutableStateOf(null)
+        private set
+
+    /**
+     * What the progress screen should open showing. Null when it was opened from the top.
+     *
+     * DEAD-CODE(progress-deep-link) — always null; see [ProgressFocus].
+     */
+    var progressFocus: ProgressFocus? by mutableStateOf(null)
         private set
 
     /**
@@ -183,10 +225,25 @@ class MapViewModel : ViewModel() {
     }
 
     fun showProgress() {
+        progressFocus = null
+        screen = Screen.PROGRESS
+    }
+
+    /**
+     * Opens the breakdown at one bydel or street.
+     *
+     * An overload rather than a default argument, so the bare `::showProgress` reference
+     * the button is wired to stays unambiguous.
+     *
+     * DEAD-CODE(progress-deep-link) — no caller; see [ProgressFocus].
+     */
+    fun showProgress(focus: ProgressFocus) {
+        progressFocus = focus
         screen = Screen.PROGRESS
     }
 
     fun showMap() {
+        progressFocus = null
         screen = Screen.MAP
     }
 
@@ -235,6 +292,10 @@ class MapViewModel : ViewModel() {
                     persist(activeCoverage)
                     milestones?.check(activeCoverage, walked)?.let(::announce)
                 }
+                // Every fix, not only the ones that credited new road. Walking back down a
+                // street you have already finished marks nothing and bumps no revision,
+                // and that is precisely when the readout must still name the street.
+                whereabouts = activeCoverage.whereabouts(ready.network)
                 if (followPosition) mapState.moveTo(fix.position)
             }
         }
@@ -292,6 +353,10 @@ class MapViewModel : ViewModel() {
         isTracking = false
         keyboardWalker?.releaseAll()
         keyboardWalker = null
+        // Coverage is never told that tracking stopped, so it still holds the last match.
+        // Clearing here is what collapses the readout rather than leaving it stranded on
+        // whichever street the walk happened to end on.
+        whereabouts = null
 
         // Flush on stop, so the throttle above can never lose the tail of a walk.
         val active = coverage

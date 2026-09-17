@@ -8,9 +8,9 @@ package no.gatelangs.app.model
  * congratulated twice for the same thing or congratulated backwards.
  */
 enum class Milestone(val fraction: Double, val title: String) {
-    HALFWAY(0.5, "Halfway"),
-    NEARLY(0.8, "Nearly there"),
-    CLEARED(1.0, "Street cleared"),
+    HALFWAY(0.5, "Halvveis"),
+    NEARLY(0.8, "Nesten i mål"),
+    CLEARED(1.0, "Gate fullført"),
     ;
 
     /** Whether this is the one worth interrupting for. */

@@ -30,6 +30,15 @@ class Coverage(private val network: RoadNetwork) {
     /** The segment the last fix matched, or -1. Used to fill the span between fixes. */
     private var previousMatch = -1
 
+    /**
+     * The segment under the last fix, or -1 when there was no road under it.
+     *
+     * The answer [record] already reached for its own purposes: which road you are on is
+     * decided once per fix by [bestMatch], and the map's readout shows that decision
+     * rather than arriving at a second opinion that could disagree with what got credited.
+     */
+    val currentSegment: Int get() = previousMatch
+
     /** Whether segment [id] has been walked. */
     fun isWalked(id: Int): Boolean = walked[id]
 

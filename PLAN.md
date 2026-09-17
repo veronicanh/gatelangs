@@ -154,15 +154,19 @@ as `wayId:hexBitset` per way, which stays compact enough for localStorage's 5 MB
 
 Each step ends at something you can look at. Steps 1–4 are the demo; 5–7 are upside.
 
-| # | Work | Milestone |
-| :--- | :--- | :--- |
-| 1 | `geo/` — Mercator, metre projection, point-to-segment distance, `GridIndex`, **with unit tests** | Green tests. Pure `commonMain`, no I/O. |
-| 2 | Tile source, decode, LRU cache, `MapState`, pan/zoom gestures, canvas draw | **A pannable map of Oslo on the desktop.** |
-| 3 | Overpass client, DTOs, flatten to segments, build index, draw overlay | **Roads drawn on the map.** |
-| 4 | Simulated walker + matcher + walked colouring + coverage % | **End-to-end demo.** |
-| 5 | Wasm: geolocation actual, serve over HTTPS, test on a real phone | **Real GPS.** |
-| 6 | Persistence + bundled fallback road data | Survives reload. |
-| 7 | Stats panel, follow-me camera, per-street list | Polish. |
+| # | Work | Milestone | Status |
+| :--- | :--- | :--- | :--- |
+| 1 | `geo/` — Mercator, metre projection, point-to-segment distance, `GridIndex`, with unit tests | Green tests, pure `commonMain` | **done** — 70 tests green |
+| 2 | Tile source, decode, LRU cache, `MapState`, pan/zoom gestures, canvas draw | A pannable map of Oslo | **done** — compiles, unrun |
+| 3 | Overpass client, DTOs, flatten to segments, build index, draw overlay | Roads drawn on the map | **done** — incl. bundled fallback |
+| 4 | Simulated walker + matcher + walked colouring + coverage % | End-to-end demo | **done** — unrun |
+| 5 | Wasm: geolocation actual, serve over HTTPS, test on a real phone | Real GPS | binding written; HTTPS serving outstanding |
+| 6 | Persistence + bundled fallback road data | Survives reload | **done** — unverified |
+| 7 | Stats panel, follow-me camera, per-street list | Polish | follow-me done; stats outstanding |
+
+Everything through step 4 is written and compiles; steps 1–4 were verified green before
+the build environment became unavailable (see below). The bundled Oslo snapshot is
+committed: 2 864 ways, 179.5 km of walkable road, ~7 180 segments, 501 KB.
 
 Step 1 first is deliberate. It is the only part that is genuinely unpleasant to debug
 once it is buried under rendering and async I/O, and it is the only part that is

@@ -30,5 +30,6 @@ data class TileSource(
             urlTemplate = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
             attribution = "© OpenStreetMap contributors",
         )
+
     }
 }

@@ -106,7 +106,8 @@ class MapViewModel : ViewModel() {
 
         // Real GPS where the platform has it; the walker keeps the pipeline exercisable
         // on a laptop, which is also how this gets demoed indoors.
-        val source: LocationSource = createRealLocationSource() ?: SimulatedWalker(ready.network)
+        val source: LocationSource = createRealLocationSource()
+            ?: SimulatedWalker(ready.network, isWalked = activeCoverage::isWalked)
         locationLabel = source.label
         isTracking = true
 

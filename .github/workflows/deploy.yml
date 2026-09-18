@@ -1,8 +1,8 @@
-# Builds the Wasm web bundle and ships it to Cloudflare Workers.
+# Builds the Wasm web bundle and ships it to Netlify.
 #
-# The build happens here rather than on Cloudflare because Cloudflare's build
-# image has no JDK, so `./gradlew` cannot run there. Cloudflare only receives the
-# finished static files.
+# The build happens here rather than on Netlify because Netlify's build image has
+# no JDK, so `./gradlew` cannot run there. Netlify only receives the finished
+# static files.
 name: Deploy
 
 on:
@@ -36,9 +36,9 @@ jobs:
           CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
         run: ./gradlew :composeApp:wasmJsBrowserDistribution --no-daemon
 
-      # Fails loudly here rather than as wrangler's vaguer "could not detect a
-      # directory containing static files".
-      - name: Check the bundle is where wrangler.toml expects it
+      # Fails loudly here rather than as a deployed 404, which is what Netlify
+      # serves for an empty publish directory.
+      - name: Check the bundle is where netlify.toml expects it
         run: |
           dist=composeApp/build/dist/wasmJs/productionExecutable
           test -f "$dist/index.html" || {
@@ -46,9 +46,18 @@ jobs:
             find composeApp/build/dist -maxdepth 3 -type d
             exit 1
           }
+          # Normally copied out of composeApp/src/wasmJsMain/resources/ by the
+          # distribution task. Written here too so a change in how Kotlin copies
+          # web resources cannot silently cost us deep-link routing.
+          test -f "$dist/_redirects" || printf '/*  /index.html  200\n' > "$dist/_redirects"
           ls -lh "$dist"
 
-      - uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Deploy to Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          npx --yes netlify-cli deploy \
+            --prod \
+            --dir composeApp/build/dist/wasmJs/productionExecutable \
+            --message "$GITHUB_SHA"

@@ -1,0 +1,5 @@
+# Everything in this directory is copied to the root of the web bundle, so this
+# lands next to index.html where Netlify looks for it.
+#
+# One page, no router: any path that is not a real file serves index.html.
+/*  /index.html  200

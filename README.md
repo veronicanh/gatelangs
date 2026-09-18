@@ -61,21 +61,31 @@ To pre-download every dependency and the JDK 21 toolchain:
 
 ## Deploy
 
-The web build ships to Cloudflare Workers as static assets — `wrangler.toml` points at
-the Gradle output and there is no Worker script.
+The web build ships to Netlify as static files — `netlify.toml` points at the Gradle
+output and there is no server side.
 
 Pushing to `main` builds and deploys via `.github/workflows/deploy.yml`. The build runs in
-GitHub Actions rather than in Cloudflare's own git integration because Cloudflare's build
-image has no JDK, so `./gradlew` cannot run there; Cloudflare only receives finished
-files. Two repository secrets are needed — `CLOUDFLARE_API_TOKEN` (Edit Workers) and
-`CLOUDFLARE_ACCOUNT_ID` — plus `CARTO_API_KEY` if the deployed map should be unwatermarked.
+GitHub Actions rather than in Netlify's own git integration because Netlify's build image
+has no JDK, so `./gradlew` cannot run there; Netlify only receives finished files. This
+also means the Netlify site must **not** be linked to the repo in the Netlify UI — a
+git-triggered build there would find no `index.html` (`build/` is gitignored) and publish
+an empty directory over the good deploy, which is what a site-wide 404 looks like.
+
+Two repository secrets are needed — `NETLIFY_AUTH_TOKEN` (a personal access token from
+Netlify user settings) and `NETLIFY_SITE_ID` (the site's API ID, under Site configuration
+→ General) — plus `CARTO_API_KEY` if the deployed map should be unwatermarked.
 
 To ship from your own machine instead:
 
 ```bash
 ./gradlew :composeApp:wasmJsBrowserDistribution
-npx wrangler deploy
+npx netlify-cli deploy --prod --dir composeApp/build/dist/wasmJs/productionExecutable
 ```
+
+`composeApp/src/wasmJsMain/resources/_redirects` is copied into the bundle and sends every
+path to `index.html`, so a reload on any URL still loads the app.
+
+`wrangler.toml` is the earlier Cloudflare Workers setup, left in place but unused.
 
 ## License
 

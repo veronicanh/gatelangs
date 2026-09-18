@@ -1,0 +1,21 @@
+# Netlify — Gatelangs is a static site: the Wasm bundle, its JS loader, index.html
+# and the bundled road data.
+#
+# Netlify's build image has no JDK, so `./gradlew` cannot run there. The bundle is
+# built in GitHub Actions instead (.github/workflows/deploy.yml) and pushed here
+# with the Netlify CLI; Netlify only ever receives finished files. That is why
+# there is no [build] command below — if this site is linked to the git repo in
+# the Netlify UI, unlink it, or its own builds will publish an empty directory
+# over the good deploy.
+
+[build]
+  # Where `./gradlew :composeApp:wasmJsBrowserDistribution` puts the web build.
+  # Gitignored, so it only exists in the job that just built it.
+  publish = "composeApp/build/dist/wasmJs/productionExecutable"
+
+# Same rule as the _redirects file in the bundle, kept here too so a deploy made
+# from a directory that somehow lacks it still resolves deep links.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

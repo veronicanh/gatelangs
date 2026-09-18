@@ -1,0 +1,14 @@
+# Cloudflare Workers — Gatelangs is a static site: the Wasm bundle, its JS loader,
+# index.html and the bundled road data. No Worker script, so no `main`; Cloudflare
+# serves the assets directly.
+name = "gatelangs"
+compatibility_date = "2026-09-18"
+
+[assets]
+# Where `./gradlew :composeApp:wasmJsBrowserDistribution` puts the web build.
+# Gitignored, so it has to be built in the same job that deploys (see
+# .github/workflows/deploy.yml) — Cloudflare's own build image has no JDK and
+# cannot run Gradle.
+directory = "composeApp/build/dist/wasmJs/productionExecutable"
+# One page, no router: anything that is not a file falls back to index.html.
+not_found_handling = "single-page-application"

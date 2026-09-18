@@ -4,14 +4,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -203,98 +206,108 @@ fun ProgressScreen(
         if (index >= 0) listState.scrollToItem(headerItems + index)
     }
 
-    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // The same tonal button that opens this screen from the map, so the way back
-            // looks like the way in rather than like a stray piece of text.
-            FilledTonalButton(
-                onClick = viewModel::showMap,
-                modifier = Modifier.pointerHoverIcon(PointerIcon.Hand),
-            ) { Text("‹  Kart") }
-            Text(
-                "Detaljer om fremgang",
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 12.dp),
-            )
-        }
-
-        if (canGroupByDistrict) {
-            GroupingToggle(
-                selected = grouping,
-                onSelect = { view = view.groupedBy(it) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-            )
-        }
-
-        HorizontalDivider()
-
-        LazyColumn(Modifier.weight(1f), state = listState) {
-            item("controls") {
-                ControlRow(view = view, onView = { view = it })
-            }
-
-            // Last of the headers, directly above the rows it is the sum of. Above the
-            // switch it was a fact about the city that happened to precede some controls;
-            // here it is the total line of the list underneath, which is what it is.
-            item("summary") {
-                val named = streets.namedStreets()
-                TotalSummary(
-                    walkedM = coverage.walkedLengthMeters(),
-                    totalM = network.totalLengthM,
-                    finished = named.count { it.isFinished },
-                    of = named.size,
+    // Centred and capped rather than edge to edge. A breakdown is a column of short
+    // lines — a name, a percentage, two figures — and stretching that across a laptop
+    // browser puts the name and its number a hand's width apart, which is exactly the
+    // distance that makes a list stop reading as rows. On the app the cap is unset, so
+    // this is the layout it always had.
+    Box(
+        modifier = Modifier.fillMaxSize().safeDrawingPadding(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        Column(Modifier.fillMaxHeight().widthIn(max = contentMaxWidth)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // The same tonal button that opens this screen from the map, so the way back
+                // looks like the way in rather than like a stray piece of text.
+                FilledTonalButton(
+                    onClick = viewModel::showMap,
+                    modifier = Modifier.pointerHoverIcon(PointerIcon.Hand),
+                ) { Text("‹  Kart") }
+                Text(
+                    "Detaljer om fremgang",
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(start = 12.dp),
                 )
             }
 
-            items(
-                bodyRows,
-                // The key has to carry the parent: Parkveien exists as a top-level row and as
-                // a child of two different bydeler, and a duplicate key is a crash, not a glitch.
-                key = { "${it.kind}-${it.parent.orEmpty()}-${it.progress.name}" },
-            ) { row ->
-                BreakdownRow(
-                    row = row,
-                    query = query,
-                    onToggle = {
-                        val name = row.progress.name
-                        openDistricts = if (name in openDistricts) openDistricts - name else openDistricts + name
-                    },
-                    onShowAll = {
-                        query = ""
-                        openDistricts = openDistricts + row.progress.name
-                    },
+            if (canGroupByDistrict) {
+                GroupingToggle(
+                    selected = grouping,
+                    onSelect = { view = view.groupedBy(it) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                 )
             }
 
-            if (bodyRows.isEmpty()) {
-                item("empty") {
-                    EmptyState(
+            HorizontalDivider()
+
+            LazyColumn(Modifier.weight(1f), state = listState) {
+                item("controls") {
+                    ControlRow(view = view, onView = { view = it })
+                }
+
+                // Last of the headers, directly above the rows it is the sum of. Above the
+                // switch it was a fact about the city that happened to precede some controls;
+                // here it is the total line of the list underneath, which is what it is.
+                item("summary") {
+                    val named = streets.namedStreets()
+                    TotalSummary(
+                        walkedM = coverage.walkedLengthMeters(),
+                        totalM = network.totalLengthM,
+                        finished = named.count { it.isFinished },
+                        of = named.size,
+                    )
+                }
+
+                items(
+                    bodyRows,
+                    // The key has to carry the parent: Parkveien exists as a top-level row and as
+                    // a child of two different bydeler, and a duplicate key is a crash, not a glitch.
+                    key = { "${it.kind}-${it.parent.orEmpty()}-${it.progress.name}" },
+                ) { row ->
+                    BreakdownRow(
+                        row = row,
                         query = query,
-                        filter = view.filter,
-                        searching = searching,
-                        onReset = {
+                        onToggle = {
+                            val name = row.progress.name
+                            openDistricts = if (name in openDistricts) openDistricts - name else openDistricts + name
+                        },
+                        onShowAll = {
                             query = ""
-                            view = view.copy(filter = ProgressFilter.ALL)
+                            openDistricts = openDistricts + row.progress.name
                         },
                     )
                 }
+
+                if (bodyRows.isEmpty()) {
+                    item("empty") {
+                        EmptyState(
+                            query = query,
+                            filter = view.filter,
+                            searching = searching,
+                            onReset = {
+                                query = ""
+                                view = view.copy(filter = ProgressFilter.ALL)
+                            },
+                        )
+                    }
+                }
             }
+
+            HorizontalDivider()
+
+            SearchField(
+                query = query,
+                onQuery = { query = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            )
         }
-
-        HorizontalDivider()
-
-        SearchField(
-            query = query,
-            onQuery = { query = it },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        )
     }
 }
 

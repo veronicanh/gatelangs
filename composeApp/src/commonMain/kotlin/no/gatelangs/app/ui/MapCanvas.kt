@@ -182,6 +182,11 @@ private fun DrawScope.drawRoads(
     // way round from before: what is left to walk is the thing worth looking at, so it
     // gets the top layer and the heavier stroke, and finished road sinks behind it as a
     // thinner grey line.
+    //
+    // The two factors are what carries that, not the colours: at a glance the map is read
+    // by line weight long before anyone resolves grey from amber, and 0.8 against 1.4 is
+    // most of a two-to-one ratio — enough for walked road to recede without breaking up at
+    // the low zooms, where the base stroke is already only a pixel and a half.
     for (pass in 0..1) {
         val drawingWalked = pass == 0
         for (id in ids) {
@@ -192,7 +197,7 @@ private fun DrawScope.drawRoads(
                 color = if (isWalked) walkedColor else unwalkedColor,
                 start = state.screenOf(segment.a),
                 end = state.screenOf(segment.b),
-                strokeWidth = if (isWalked) width else width * 1.4f,
+                strokeWidth = if (isWalked) width * 0.8f else width * 1.4f,
                 cap = StrokeCap.Round,
             )
         }

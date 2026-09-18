@@ -59,6 +59,24 @@ To pre-download every dependency and the JDK 21 toolchain:
 ./gradlew verifySetup
 ```
 
+## Deploy
+
+The web build ships to Cloudflare Workers as static assets — `wrangler.toml` points at
+the Gradle output and there is no Worker script.
+
+Pushing to `main` builds and deploys via `.github/workflows/deploy.yml`. The build runs in
+GitHub Actions rather than in Cloudflare's own git integration because Cloudflare's build
+image has no JDK, so `./gradlew` cannot run there; Cloudflare only receives finished
+files. Two repository secrets are needed — `CLOUDFLARE_API_TOKEN` (Edit Workers) and
+`CLOUDFLARE_ACCOUNT_ID` — plus `CARTO_API_KEY` if the deployed map should be unwatermarked.
+
+To ship from your own machine instead:
+
+```bash
+./gradlew :composeApp:wasmJsBrowserDistribution
+npx wrangler deploy
+```
+
 ## License
 
 [MIT](LICENSE).

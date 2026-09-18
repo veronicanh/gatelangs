@@ -1,0 +1,54 @@
+# Builds the Wasm web bundle and ships it to Cloudflare Workers.
+#
+# The build happens here rather than on Cloudflare because Cloudflare's build
+# image has no JDK, so `./gradlew` cannot run there. Cloudflare only receives the
+# finished static files.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gradle itself runs on this JDK; the build's own jvmToolchain(21) is
+      # already satisfied by it, so foojay has nothing to download.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build web bundle
+        env:
+          # Read by the generateMapKeys task when local.properties is absent,
+          # which it always is here — the file is gitignored.
+          CARTO_API_KEY: ${{ secrets.CARTO_API_KEY }}
+        run: ./gradlew :composeApp:wasmJsBrowserDistribution --no-daemon
+
+      # Fails loudly here rather than as wrangler's vaguer "could not detect a
+      # directory containing static files".
+      - name: Check the bundle is where wrangler.toml expects it
+        run: |
+          dist=composeApp/build/dist/wasmJs/productionExecutable
+          test -f "$dist/index.html" || {
+            echo "No index.html in $dist — the Gradle output path moved."
+            find composeApp/build/dist -maxdepth 3 -type d
+            exit 1
+          }
+          ls -lh "$dist"
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

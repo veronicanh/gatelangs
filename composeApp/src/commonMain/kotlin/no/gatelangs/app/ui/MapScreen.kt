@@ -116,7 +116,7 @@ fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
                     contentAlignment = Alignment.TopCenter,
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxHeight().widthIn(max = mapOverlayMaxWidth),
+                        modifier = Modifier.fillMaxHeight().widthIn(max = contentMaxWidth),
                         verticalArrangement = Arrangement.SpaceBetween,
                     ) {
                         CoveragePanel(viewModel, state, revision)

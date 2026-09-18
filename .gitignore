@@ -5,7 +5,6 @@ build/
 
 # Kotlin
 .kotlin/
-kotlin-js-store/
 
 # Local config — machine specific, never commit
 local.properties

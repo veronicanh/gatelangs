@@ -4,6 +4,40 @@ package no.gatelangs.app.map
 data class TileKey(val zoom: Int, val x: Int, val y: Int)
 
 /**
+ * The tile one zoom level out that contains this one, or null at the root.
+ *
+ * What makes a blurred stand-in possible while the real tile is still in flight: the
+ * parent covers the same ground at a quarter of the detail, and a quarter of it is
+ * exactly this tile.
+ */
+fun TileKey.parent(): TileKey? = if (zoom <= 0) null else TileKey(zoom - 1, x / 2, y / 2)
+
+/**
+ * The distinct ancestors of these tiles, up to [levels] zoom levels out.
+ *
+ * Fetched alongside the tiles actually being drawn, and far cheaper than they look: each
+ * level out covers four times the ground, so two levels of ancestors for a fifty-tile
+ * viewport is under a dozen extra requests. They are what the map falls back to while the
+ * real tiles are in flight — without them the first load has nothing to show but the page
+ * background, and they arrive first precisely because there are so few of them.
+ */
+fun Collection<TileKey>.ancestors(levels: Int): List<TileKey> {
+    if (levels <= 0 || isEmpty()) return emptyList()
+    val found = LinkedHashSet<TileKey>()
+    var frontier: Collection<TileKey> = this
+    repeat(levels) {
+        val next = LinkedHashSet<TileKey>()
+        for (key in frontier) {
+            val parent = key.parent() ?: continue
+            if (found.add(parent)) next.add(parent)
+        }
+        if (next.isEmpty()) return found.toList()
+        frontier = next
+    }
+    return found.toList()
+}
+
+/**
  * Where basemap imagery comes from.
  *
  * Deliberately just a URL template: swapping OSM for Mapbox, MapTiler or Stadia is a
@@ -22,6 +56,16 @@ data class TileSource(
     val urlTemplate: String,
     val attribution: String,
     val maxZoom: Int = 19,
+    /**
+     * How many tiles to ask this publisher for at once.
+     *
+     * A property of the publisher, not of the app: a CDN we hold an API key for will
+     * serve a screenful over one multiplexed HTTP/2 connection without noticing, while a
+     * free community service asks to be treated gently. Filling a viewport takes 40-90
+     * tiles, so this number is very nearly the divisor on how long the map takes to
+     * appear.
+     */
+    val concurrentRequests: Int = 6,
 ) {
     fun urlFor(key: TileKey): String = urlTemplate
         .replace("{z}", key.zoom.toString())
@@ -38,6 +82,9 @@ data class TileSource(
             id = "osm",
             urlTemplate = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
             attribution = "© OpenStreetMap contributors",
+            // Left low on purpose. Their usage policy asks for restraint, and this is the
+            // fallback basemap rather than the one the app ships pointed at.
+            concurrentRequests = 6,
         )
 
         /**
@@ -81,4 +128,8 @@ internal fun cartoDarkMatter(apiKey: String): TileSource = TileSource(
     },
     attribution = "© OpenStreetMap contributors © CARTO",
     maxZoom = 20,
+    // A CDN, over HTTP/2, that we hold a key for. Six at a time turned a single screenful
+    // into a dozen sequential round trips for no reason: the limit was sized for HTTP/1.1,
+    // where six connections per origin was the browser's own ceiling.
+    concurrentRequests = 24,
 )

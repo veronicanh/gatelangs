@@ -101,9 +101,16 @@ class MapState(
         return keys
     }
 
-    /** Where tile [key] lands on screen, given the current camera. */
+    /**
+     * Where tile [key] lands on screen, given the current camera.
+     *
+     * Derives the span from the key's own zoom rather than from [tileScale], so a tile
+     * from a coarser level places correctly too — which is what lets a parent stand in
+     * for a tile that has not loaded yet. At `key.zoom == tileZoom` this is exactly
+     * [tileScale], so the ordinary case is unchanged.
+     */
     fun screenRectOf(key: TileKey): TileRect {
-        val tileSpan = TILE_SIZE * tileScale
+        val tileSpan = TILE_SIZE * 2.0.pow(zoom - key.zoom)
         return TileRect(
             left = (key.x * tileSpan - originX).toFloat(),
             top = (key.y * tileSpan - originY).toFloat(),

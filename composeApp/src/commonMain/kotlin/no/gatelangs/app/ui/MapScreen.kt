@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -104,29 +106,39 @@ fun MapScreen(viewModel: MapViewModel = viewModel { MapViewModel() }) {
                     modifier = Modifier.fillMaxSize(),
                 )
 
-                Column(
+                // The canvas fills the window; the overlay does not have to. On a laptop
+                // browser tab the readout was a band across sixteen hundred points with the
+                // street name at one end and the percentage at the other, which is a lot of
+                // screen spent on making a card harder to read. Centred rather than left,
+                // because a column pinned to one edge of a wide map looks dropped there.
+                Box(
                     modifier = Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
+                    contentAlignment = Alignment.TopCenter,
                 ) {
-                    CoveragePanel(viewModel, state, revision)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // In the layout rather than floating over it: the coverage panel
-                        // owns the top corner and the marker owns the middle, and a
-                        // banner that covered either would hide the thing it is
-                        // congratulating you about.
-                        AchievementBanner(
-                            achievement = viewModel.achievement,
-                            visible = viewModel.achievementVisible,
-                            modifier = Modifier.align(Alignment.CenterHorizontally),
-                        )
-                        Controls(viewModel)
-                        // Both OpenStreetMap and CARTO require this to be shown. It is a
-                        // condition of using the tiles, not decoration.
-                        Text(
-                            viewModel.tiles.source.attribution,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    Column(
+                        modifier = Modifier.fillMaxHeight().widthIn(max = mapOverlayMaxWidth),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        CoveragePanel(viewModel, state, revision)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            // In the layout rather than floating over it: the coverage
+                            // panel owns the top corner and the marker owns the middle,
+                            // and a banner that covered either would hide the thing it
+                            // is congratulating you about.
+                            AchievementBanner(
+                                achievement = viewModel.achievement,
+                                visible = viewModel.achievementVisible,
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
+                            )
+                            Controls(viewModel)
+                            // Both OpenStreetMap and CARTO require this to be shown. It
+                            // is a condition of using the tiles, not decoration.
+                            Text(
+                                viewModel.tiles.source.attribution,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -430,6 +442,23 @@ private fun Controls(viewModel: MapViewModel) {
                 if (viewModel.locationLabel.isNotEmpty()) {
                     Text(
                         viewModel.locationLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                val failure = viewModel.locationError
+                when {
+                    failure != null -> Text(
+                        failure,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    // The one state with nothing else to show: the watch is live and
+                    // permission was given, but no fix has arrived yet. The keyboard
+                    // walker emits its starting fix before a key is touched, so it is
+                    // never here.
+                    viewModel.isTracking && !viewModel.useKeyboard && viewModel.position == null -> Text(
+                        "Venter på GPS-signal…",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -18,8 +18,13 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
 import no.gatelangs.app.geo.LatLon
+import no.gatelangs.app.geo.TILE_SIZE
 import no.gatelangs.app.map.MapState
 import no.gatelangs.app.map.TileCache
+import no.gatelangs.app.map.TileKey
+import no.gatelangs.app.map.TileRect
+import no.gatelangs.app.map.ancestors
+import no.gatelangs.app.map.parent
 import no.gatelangs.app.model.Coverage
 import no.gatelangs.app.model.RoadNetwork
 import no.gatelangs.app.ui.theme.LocalMapColors
@@ -52,8 +57,13 @@ fun MapCanvas(
     val colors = LocalMapColors.current
 
     // Requesting tiles is a side effect, so it belongs here and not in the draw pass.
-    val visible = state.visibleTiles()
-    LaunchedEffect(visible) { tiles.prefetch(visible) }
+    //
+    // Remembered because this composable re-runs on every position fix, and visibleTiles()
+    // allocates a fresh list of up to ~90 keys each time. The camera is what the tile set
+    // depends on, so the camera is what it is keyed on.
+    val visible = remember(state.center, state.zoom, state.viewportSize) { state.visibleTiles() }
+    val wanted = remember(visible) { visible + visible.ancestors(COARSE_LEVELS) }
+    LaunchedEffect(wanted) { tiles.prefetch(wanted) }
 
     Canvas(
         modifier = modifier
@@ -85,7 +95,7 @@ fun MapCanvas(
                 }
             },
     ) {
-        drawTiles(state, tiles)
+        drawTiles(state, tiles, visible)
         if (network != null) drawRoads(state, network, coverage, colors.walked, colors.unwalked)
         if (position != null) {
             drawPosition(state, position, positionAccuracyM, colors.currentPosition, colors.positionHalo)
@@ -93,9 +103,8 @@ fun MapCanvas(
     }
 }
 
-private fun DrawScope.drawTiles(state: MapState, tiles: TileCache) {
-    for (key in state.visibleTiles()) {
-        val image = tiles[key] ?: continue
+private fun DrawScope.drawTiles(state: MapState, tiles: TileCache, visible: List<TileKey>) {
+    for (key in visible) {
         val rect = state.screenRectOf(key)
         val size = IntSize(
             // Ceil the drawn size so neighbouring tiles never leave a hairline seam
@@ -103,12 +112,58 @@ private fun DrawScope.drawTiles(state: MapState, tiles: TileCache) {
             width = (rect.size + 1).toInt(),
             height = (rect.size + 1).toInt(),
         )
-        drawImage(
-            image = image,
-            dstOffset = IntOffset(rect.left.toInt(), rect.top.toInt()),
-            dstSize = size,
-            filterQuality = FilterQuality.Medium,
-        )
+        val image = tiles[key]
+        if (image != null) {
+            drawImage(
+                image = image,
+                dstOffset = IntOffset(rect.left.toInt(), rect.top.toInt()),
+                dstSize = size,
+                filterQuality = FilterQuality.Medium,
+            )
+        } else {
+            drawAncestorOf(tiles, key, rect, size)
+        }
+    }
+}
+
+/**
+ * Draws the piece of the nearest loaded ancestor that covers [key], if there is one.
+ *
+ * A tile that has not arrived used to draw nothing at all, so the page background showed
+ * through and the map appeared to load in blocks out of darkness. A coarser tile stretched
+ * over the gap is the wrong resolution but the right place, and it is already in memory:
+ * the map comes up blurred and sharpens, instead of coming up empty. Zooming in gets this
+ * for free, since the level you came from is still cached.
+ */
+private fun DrawScope.drawAncestorOf(
+    tiles: TileCache,
+    key: TileKey,
+    rect: TileRect,
+    size: IntSize,
+) {
+    var ancestor = key.parent()
+    var depth = 1
+    while (ancestor != null && depth <= MAX_FALLBACK_LEVELS) {
+        val image = tiles[ancestor]
+        if (image != null) {
+            // The child is one cell of a `step` by `step` grid over the ancestor, and
+            // which cell is just the low bits of its own coordinates.
+            val step = 1 shl depth
+            val sub = TILE_SIZE.toInt() / step
+            drawImage(
+                image = image,
+                srcOffset = IntOffset((key.x % step) * sub, (key.y % step) * sub),
+                srcSize = IntSize(sub, sub),
+                dstOffset = IntOffset(rect.left.toInt(), rect.top.toInt()),
+                dstSize = size,
+                // It is a stand-in about to be painted over; Medium would cost mipmap
+                // work per frame for a blur nobody is meant to study.
+                filterQuality = FilterQuality.Low,
+            )
+            return
+        }
+        ancestor = ancestor.parent()
+        depth++
     }
 }
 
@@ -174,6 +229,18 @@ private fun strokeWidthFor(zoom: Double): Float = when {
     zoom < 17 -> 4f
     else -> 6f
 }
+
+/**
+ * How many zoom levels of coarse tiles to fetch alongside the visible ones.
+ *
+ * Two is enough to cover a viewport several times over from one or two tiles, which is
+ * what makes the first paint immediate. A third buys almost nothing: by then a single
+ * tile spans sixteen of the ones being drawn and is too blurred to read as the map.
+ */
+private const val COARSE_LEVELS = 2
+
+/** How far up to look for a stand-in. Past four the sub-rect is 16px and it is mush. */
+private const val MAX_FALLBACK_LEVELS = 4
 
 private const val ZOOM_PER_SCROLL_TICK = 0.35
 

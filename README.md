@@ -28,9 +28,16 @@ network tab on the web build. That is unavoidable for a client-side map and is w
 key is worth scoping to this project rather than reusing one.
 
 Tiles are only ever fetched once. On desktop they are kept under `~/.gatelangs/tiles/`
-and reused on every later run; delete that directory to force a refresh. On the web the
-browser's own HTTP cache does the same job — CARTO serves tiles with a 180-day
-`max-age` — so no second cache is kept there.
+and reused on every later run; delete that directory to force a refresh. On the web they
+go into a `gatelangs-tiles` bucket in the browser's Cache Storage — clear it from
+DevTools → Application → Cache Storage. The browser's HTTP cache would nearly do the same
+job, but it is keyed on the full URL and ours carries `?key=`, so rotating the CARTO key
+would throw away every cached tile for imagery that had not changed. Cache Storage is
+secure-context only; over plain HTTP nothing is kept and every tile is re-fetched.
+
+While tiles are in flight the map draws the nearest coarser tile it already holds,
+stretched over the gap, so the basemap comes up blurred and sharpens rather than filling
+in block by block out of an empty background.
 
 ## Running
 

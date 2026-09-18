@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -99,6 +101,17 @@ class MapViewModel : ViewModel() {
     var followPosition: Boolean by mutableStateOf(true)
 
     var locationLabel: String by mutableStateOf("")
+        private set
+
+    /**
+     * Why the last walk stopped itself, in words for the screen. Null when nothing is wrong.
+     *
+     * A location source that fails is not an app that should fall over: the browser
+     * reports a missing GPS through an ordinary exception, and without somewhere to put
+     * it the walk died with the button still reading "Stopp" and nothing on screen to
+     * say why. This is that somewhere.
+     */
+    var locationError: String? by mutableStateOf(null)
         private set
 
     /**
@@ -265,6 +278,10 @@ class MapViewModel : ViewModel() {
     fun setUseKeyboard(on: Boolean) {
         if (on == keyboardControl) return
         keyboardControl = on
+        // Taking up the offer the GPS complaint made. Leaving it on screen while the
+        // keyboard drives the walk would be describing a problem you have just routed
+        // around.
+        locationError = null
         if (isTracking) {
             stopTracking()
             startTracking()
@@ -278,6 +295,7 @@ class MapViewModel : ViewModel() {
         // Real GPS where the platform has it and it has not been waved off. Otherwise
         // you drive the position yourself from the keyboard, which is both the dev loop
         // and how this gets demoed indoors — see MapScreen for the key handling.
+        locationError = null
         val real = if (useKeyboard) null else createRealLocationSource()
         val source: LocationSource = real ?: KeyboardWalker(
             // Carry on from where the marker already is, so stop/start does not teleport.
@@ -287,23 +305,41 @@ class MapViewModel : ViewModel() {
         locationLabel = source.label
         isTracking = true
 
-        trackingJob = viewModelScope.launch {
-            source.fixes().collect { fix ->
-                position = fix.position
-                positionAccuracyM = fix.accuracyM
-                val walked = activeCoverage.record(fix)
-                if (walked.isNotEmpty()) {
-                    coverageRevision++
-                    persist(activeCoverage)
-                    milestones?.check(activeCoverage, walked)?.let(::announce)
+        // Started lazily so `trackingJob` is assigned before the body can run: on the
+        // browser's immediate dispatcher an eagerly started coroutine can reach the catch
+        // below before the assignment, and the catch needs the field to hold this job.
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                source.fixes().collect { fix ->
+                    position = fix.position
+                    positionAccuracyM = fix.accuracyM
+                    val walked = activeCoverage.record(fix)
+                    if (walked.isNotEmpty()) {
+                        coverageRevision++
+                        persist(activeCoverage)
+                        milestones?.check(activeCoverage, walked)?.let(::announce)
+                    }
+                    // Every fix, not only the ones that credited new road. Walking back down a
+                    // street you have already finished marks nothing and bumps no revision,
+                    // and that is precisely when the readout must still name the street.
+                    whereabouts = activeCoverage.whereabouts(ready.network)
+                    if (followPosition) mapState.moveTo(fix.position)
                 }
-                // Every fix, not only the ones that credited new road. Walking back down a
-                // street you have already finished marks nothing and bumps no revision,
-                // and that is precisely when the readout must still name the street.
-                whereabouts = activeCoverage.whereabouts(ready.network)
-                if (followPosition) mapState.moveTo(fix.position)
+            } catch (cancel: CancellationException) {
+                // An ordinary stop. Reporting it as a location failure would put an error
+                // on screen every time the walk ends normally.
+                throw cancel
+            } catch (failure: Throwable) {
+                // Null first: stopTracking() cancels trackingJob, which is the very
+                // coroutine running this catch, and everything it does after that cancel
+                // still has to happen.
+                trackingJob = null
+                locationError = failure.message ?: "Posisjonen er ikke tilgjengelig."
+                stopTracking()
             }
         }
+        trackingJob = job
+        job.start()
     }
 
     /**

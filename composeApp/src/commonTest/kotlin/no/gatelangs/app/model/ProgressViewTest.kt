@@ -131,9 +131,25 @@ class SearchKeyTest {
 
     @Test
     fun `Grünerløkka is found by typing gruner`() {
+        // The marks with no key of their own on a Norwegian keyboard come off.
         assertTrue(row("Grünerløkka", 0.0).matches(searchKey("gruner")))
-        assertTrue(row("Bygdøy allé", 0.0).matches(searchKey("bygdoy")))
         assertTrue(row("Bygdøy allé", 0.0).matches(searchKey("alle")))
+        assertTrue(row("Bülowsgate", 0.0).matches(searchKey("bulow")))
+    }
+
+    @Test
+    fun `a is not å, o is not ø, and ae is not æ`() {
+        // The three are letters, not accents. Folding them would answer "a" with every å in
+        // Oslo, and file Ålesundgata under A — which is not where anyone would look for it.
+        assertFalse(row("Ålesundgata", 0.0).matches(searchKey("alesund")))
+        assertFalse(row("Østerdalsgata", 0.0).matches(searchKey("osterdals")))
+        assertFalse(row("Bygdøy allé", 0.0).matches(searchKey("bygdoy")))
+        assertFalse(row("Ærlig vei", 0.0).matches(searchKey("aerlig")))
+
+        // Typed properly, they match — everyone writing these names has the keys.
+        assertTrue(row("Ålesundgata", 0.0).matches(searchKey("ålesund")))
+        assertTrue(row("Østerdalsgata", 0.0).matches(searchKey("østerdals")))
+        assertTrue(row("Bygdøy allé", 0.0).matches(searchKey("bygdøy")))
     }
 
     @Test

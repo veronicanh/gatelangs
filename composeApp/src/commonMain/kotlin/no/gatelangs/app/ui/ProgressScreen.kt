@@ -97,10 +97,10 @@ import kotlin.math.roundToInt
  *
  * The chrome is arranged around one number: how much of the screen is left for the list. At
  * 360×600 — which is what a phone browser gives you, since `index.html` turns off zooming —
- * a row is 71dp, so anything pinned costs most of a row. Two things are: the title bar at the
- * top and the search box at the bottom. The summary, the switch and the sort chips are the
- * first three items of the list itself and scroll away, which is what keeps six streets on
- * screen at once; reading a ranking you can only see three rows of is not reading a ranking.
+ * a row is 71dp, so anything pinned costs most of a row. Three things are: the title and the
+ * bydel/gate switch at the top, the search box at the bottom. The sort chips and the total
+ * band are the list's own first two items and scroll away, which is what keeps five or six
+ * streets on screen; reading a ranking you can only see three rows of is not reading one.
  */
 @Composable
 fun ProgressScreen(
@@ -173,7 +173,10 @@ fun ProgressScreen(
     // Everything above the first breakdown row, counted from the same conditions that emit
     // them rather than written down as a number — a stale "+1 for the Totalt header" is
     // exactly the bug that survives a redesign.
-    val headerItems = 1 + (if (canGroupByDistrict) 1 else 0) + 1
+    // Everything the list draws above the first breakdown row: the chips and the total
+    // band. The switch is not among them any more — it lives in the fixed header, above the
+    // rule — which is exactly why this is counted rather than written down as a number.
+    val headerItems = 2
 
     val listState = rememberLazyListState()
     val currentRows by rememberUpdatedState(bodyRows)
@@ -220,9 +223,26 @@ fun ProgressScreen(
             )
         }
 
+        if (canGroupByDistrict) {
+            GroupingToggle(
+                selected = grouping,
+                onSelect = { view = view.groupedBy(it) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
+
         HorizontalDivider()
 
         LazyColumn(Modifier.weight(1f), state = listState) {
+            item("controls") {
+                ControlRow(view = view, onView = { view = it })
+            }
+
+            // Last of the headers, directly above the rows it is the sum of. Above the
+            // switch it was a fact about the city that happened to precede some controls;
+            // here it is the total line of the list underneath, which is what it is.
             item("summary") {
                 val named = streets.namedStreets()
                 TotalSummary(
@@ -231,22 +251,6 @@ fun ProgressScreen(
                     finished = named.count { it.isFinished },
                     of = named.size,
                 )
-                HorizontalDivider()
-            }
-
-            if (canGroupByDistrict) {
-                item("tabs") {
-                    GroupingToggle(
-                        selected = grouping,
-                        onSelect = { view = view.groupedBy(it) },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                    )
-                }
-            }
-
-            item("controls") {
-                ControlRow(view = view, onView = { view = it })
-                HorizontalDivider()
             }
 
             items(
@@ -429,14 +433,19 @@ private fun SearchField(
 }
 
 /**
- * The city's own row, sitting where a row would sit.
+ * The total line of the list below it.
  *
- * Built to the same measurements as [ProgressRow] rather than as a card: a panel with its own
- * padding, corner and elevation announced itself as a different kind of object and cost most
- * of a screenful doing it. The only thing that separates it from the streets underneath is
- * the weight of its first line and the colour of its track — which is the map's amber, the
- * one place on this screen that borrows it, because the empty half of this bar is the part of
- * the city still to walk.
+ * Built to [ProgressRow]'s measurements exactly — same paddings, same 5dp rhythm, same two
+ * label lines — and then set apart by colour rather than by size. A full-bleed band of
+ * `surfaceVariant` where every row beneath it is on `background` is a step in luminance the
+ * eye catches before it has read a word, and it costs nothing in height; the card this
+ * replaced stood out by spending most of a screenful on corners, padding and elevation.
+ *
+ * Full-bleed on purpose. The moment a band takes a margin it becomes a card again, floating
+ * above the list rather than belonging to it.
+ *
+ * Its track is the map's amber, the one place on this screen that borrows it, because the
+ * empty half of this bar is the part of the city still to walk.
  *
  * Nothing here is ever time-based. Coverage is a `BooleanArray` with no timestamps, so
  * "+2,3 km denne uken", streaks and "ferdig om åtte måneder" are not merely missing, they are
@@ -452,36 +461,42 @@ private fun TotalSummary(
     modifier: Modifier = Modifier,
 ) {
     val fraction = if (totalM <= 0.0) 0.0 else walkedM / totalM
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.fillMaxWidth(),
     ) {
-        Text(
-            "${percentOf(fraction)} av byen gått",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        LinearProgressIndicator(
-            progress = { fraction.toFloat() },
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)),
-            trackColor = LocalMapColors.current.unwalked.copy(alpha = 0.30f),
-            drawStopIndicator = {},
-        )
-        Text(
-            if (walkedM == totalM) {
-                "Gått ${labeledKmOf(totalM)}"
-            } else {
-                "Gått ${kmOf(walkedM)} av ${labeledKmOf(totalM)} · ${labeledKmOf(totalM - walkedM)} gjenstår"
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            tallyLine(finished, of),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                "${percentOf(fraction)} av byen gått",
+                style = MaterialTheme.typography.titleMedium,
+                // The one full-strength line on a band whose own colour is already a step up
+                // from the rows: the rest stays at `onSurfaceVariant` so this reads as the
+                // headline rather than as four equally loud lines.
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            LinearProgressIndicator(
+                progress = { fraction.toFloat() },
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(3.dp)),
+                trackColor = LocalMapColors.current.unwalked.copy(alpha = 0.30f),
+                drawStopIndicator = {},
+            )
+            Text(
+                if (walkedM == totalM) {
+                    "Gått ${labeledKmOf(totalM)}"
+                } else {
+                    "Gått ${kmOf(walkedM)} av ${labeledKmOf(totalM)} · ${labeledKmOf(totalM - walkedM)} gjenstår"
+                },
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text(
+                tallyLine(finished, of),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
     }
 }
 
@@ -500,6 +515,14 @@ private fun tallyLine(finished: Int, of: Int): String = "$finished av $of gater 
  *
  * Material's segmented button is no longer experimental, but two clickable surfaces in a pill
  * were already here and look the same; swapping them would be churn, not a fix.
+ *
+ * The 4dp of side padding is the whole trick, and it was missing: without it the selected half
+ * is exactly half the trough, so its rounded end sits flush against the trough's own rounded
+ * end at the outer edge and the thumb reads as having slipped sideways out of its slot.
+ *
+ * Sides only. The thumb is meant to fill the trough's height — it is a half of it, not a bead
+ * inside it — so vertical padding here just stacks on top of the label's own and puts a band
+ * of trough above and below the selected half that belongs to neither.
  */
 @Composable
 private fun GroupingToggle(
@@ -512,6 +535,7 @@ private fun GroupingToggle(
         modifier = modifier
             .clip(pill)
             .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 4.dp)
             .selectableGroup(),
     ) {
         for (option in Grouping.entries) {

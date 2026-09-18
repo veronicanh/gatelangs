@@ -100,15 +100,21 @@ fun ProgressFilter.accepts(row: Progress): Boolean =
 /**
  * Folds one character to the letter someone hunting for it would type.
  *
- * One character in, one out, never "ae" for "æ", so an offset into the folded string is
- * still an offset into the original. That is what keeps emboldening the matched part of a
- * name a later possibility rather than an off-by-two. The cost is that "Baerum" will not
- * find "Bærum" — which nobody with a Norwegian keyboard was going to type anyway.
+ * **æ, ø and å are not in here, and must never be.** They are letters of the alphabet, not
+ * accented forms of a and o — Ålesundgata does not begin with an A any more than Bergen
+ * begins with an A, and a search that answered "a" with every å in Oslo would be answering a
+ * question nobody asked. Everyone typing Norwegian street names has the three keys.
+ *
+ * What *is* folded is the marks that have no key of their own here: ü, é, ô, ç and their
+ * relatives, so "gruner" still finds Grünerløkka. ö and ä go with them — in the languages
+ * that use them those are a and o wearing a diaeresis, the same as ü, which is the one thing
+ * separating them from the three letters above.
+ *
+ * One character in, one out, never "ae" for "æ", so an offset into the folded string is still
+ * an offset into the original. That is what keeps emboldening the matched part of a name a
+ * later possibility rather than an off-by-two.
  */
 private fun fold(c: Char): Char = when (c) {
-    'æ' -> 'a'
-    'ø' -> 'o'
-    'å' -> 'a'
     'ü' -> 'u'
     'ö' -> 'o'
     'ä' -> 'a'

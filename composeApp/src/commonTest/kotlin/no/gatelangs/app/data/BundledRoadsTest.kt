@@ -4,7 +4,9 @@ import kotlinx.coroutines.test.runTest
 import no.gatelangs.app.map.createHttpClient
 import no.gatelangs.app.model.Coverage
 import no.gatelangs.app.model.Fix
+import no.gatelangs.app.resources.Res
 import kotlin.test.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -39,18 +41,29 @@ class BundledRoadsTest {
     }
 
     @Test
-    fun `the snapshot carries the bydel outlines to group progress by`() = runTest {
-        // The progress screen breaks the city into bydeler, and they travel in the same
-        // file as the roads. A snapshot without them degrades to a flat list of every
-        // street in Oslo.
+    fun `the bydel outlines load alongside the roads`() = runTest {
+        // They live in their own file now — districts-oslo.json — so this also checks the
+        // two are still wired together. The progress screen breaks the city into bydeler;
+        // without them it degrades to a flat list of every street in Oslo.
         val network = repository().loadBundled()
         assertTrue(
             network.districts.size >= 15,
-            "only ${network.districts.size} bydeler in the snapshot",
+            "only ${network.districts.size} bydeler loaded",
         )
         assertTrue(
             network.districts.all { d -> d.rings.isNotEmpty() && d.rings.all { it.size >= 4 } },
             "a bydel arrived without a usable outline",
+        )
+    }
+
+    @Test
+    fun `the road snapshot no longer carries outlines of its own`() = runTest {
+        // The point of the split: regenerating roads from Overpass must not be able to
+        // take the bydeler with it, because no live fetch can put them back.
+        val roads = Res.readBytes(RoadRepository.BUNDLED_PATH).decodeToString()
+        assertFalse(
+            "\"districts\"" in roads,
+            "districts are back in ${RoadRepository.BUNDLED_PATH}",
         )
     }
 

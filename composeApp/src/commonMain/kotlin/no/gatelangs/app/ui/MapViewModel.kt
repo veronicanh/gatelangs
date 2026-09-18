@@ -216,7 +216,12 @@ class MapViewModel : ViewModel() {
                     // popup for every street that was already past halfway last time.
                     milestones = Milestones(loaded.network).apply { seed(restored) }
                     coverageRevision++
-                    mapState.moveTo(loaded.network.bounds.center)
+                    // Only when the snapshot is somewhere else entirely. Now that the
+                    // data spans every bydel, its bounds centre sits in Nordmarka, and
+                    // opening the app looking at forest is worse than opening it downtown.
+                    if (INITIAL_CENTER !in loaded.network.bounds) {
+                        mapState.moveTo(loaded.network.bounds.center)
+                    }
                     LoadState.Ready(loaded.network, loaded.source)
                 },
                 onFailure = { LoadState.Failed(it.message ?: it::class.simpleName ?: "unknown error") },
@@ -372,7 +377,13 @@ class MapViewModel : ViewModel() {
     }
 
     companion object {
-        /** Central Oslo — replaced by the loaded network's own centre once it arrives. */
+        /**
+         * Central Oslo, and where the app stays.
+         *
+         * Kept rather than replaced by the snapshot's own centre: the snapshot covers the
+         * whole municipality, whose middle is forest. Only a snapshot that does not
+         * contain this point moves the camera at all.
+         */
         private val INITIAL_CENTER = LatLon(59.9225, 10.7600)
         private const val INITIAL_ZOOM = 15.0
         private val PERSIST_INTERVAL = 5.seconds

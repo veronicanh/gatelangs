@@ -71,6 +71,20 @@ private data class OverpassPoint(val lat: Double, val lon: Double)
 @Serializable
 private data class BundledRoads(
     val ways: List<BundledWay> = emptyList(),
+)
+
+/**
+ * The bydel outlines, in their own file.
+ *
+ * Separate from the roads because they are separate data: the roads are OSM and can be
+ * refreshed from Overpass at any time, while these come from Oslo kommune's
+ * `Bydel_og_delbydelsgrenser` and cannot. Keeping them in one envelope meant that
+ * regenerating the road snapshot silently risked dropping outlines that no live fetch
+ * could ever put back. They also change on entirely different timescales — a few times a
+ * year against once in a generation.
+ */
+@Serializable
+private data class BundledDistricts(
     val districts: List<BundledDistrict> = emptyList(),
 )
 
@@ -164,35 +178,52 @@ class RoadRepository(private val http: HttpClient) {
         // A snapshot predating the highway field filters down to nothing, which fails
         // here rather than quietly loading the pavements this filter exists to remove.
         require(ways.isNotEmpty()) { "bundled road data at $BUNDLED_PATH is empty" }
-        return RoadNetwork.from(
-            ways = ways,
-            districts = bundled.districts.map { district ->
-                District(
-                    name = district.name,
-                    rings = district.rings.map { ring -> ring.map { LatLon(it[0], it[1]) } },
-                )
-            },
-        )
+        return RoadNetwork.from(ways = ways, districts = loadDistricts())
     }
+
+    /**
+     * The bydel outlines, or none.
+     *
+     * Failure here is not failure of the load: without outlines the progress screen drops
+     * to a flat list of streets, which is exactly what it already does on the Overpass
+     * path. Roads are the thing the app cannot work without — a missing bydel file should
+     * cost you the breakdown, not the map. Splitting the two files is what makes that
+     * distinction expressible at all.
+     */
+    private suspend fun loadDistricts(): List<District> = runCatching {
+        val text = Res.readBytes(DISTRICTS_PATH).decodeToString()
+        json.decodeFromString(BundledDistricts.serializer(), text).districts.map { district ->
+            District(
+                name = district.name,
+                rings = district.rings.map { ring -> ring.map { LatLon(it[0], it[1]) } },
+            )
+        }
+    }.getOrDefault(emptyList())
 
     companion object {
         const val OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter"
         const val BUNDLED_PATH = "files/roads-oslo.json"
+        const val DISTRICTS_PATH = "files/districts-oslo.json"
 
         /**
-         * Everything inside Ring 3, which is the city as most people mean it.
+         * The whole municipality, as the bydel outlines describe it.
          *
-         * These are the bounds of Ring 3 (Riksvei 150) itself, measured from its own OSM
-         * geometry — lat 59.9083..59.9536, lon 10.6271..10.8083 — pushed south to the
-         * fjord so Bjørvika and the waterfront are not clipped off. A box rather than the
-         * ring's actual outline: it takes in a little beyond the ring on each side, which
-         * is the forgiving direction to be wrong in.
+         * These are the bounds of every ring in `districts-oslo.json`, which is the right
+         * box precisely because the bydeler are what progress is measured against: an area
+         * smaller than this leaves bydeler with no roads in them and a breakdown with empty
+         * rows. It was previously the much smaller Ring 3 box, and that mismatch is what
+         * this widening fixes.
+         *
+         * A box, so it also takes in slices of Bærum, Nittedal and Lørenskog. The snapshot
+         * builder clips those away against the rings; the live Overpass path does not, and
+         * a handful of neighbouring streets on a fallback load is a fair price for not
+         * shipping a polygon filter into the client.
          */
         val DEFAULT_AREA = BoundingBox(
-            south = 59.8950,
-            west = 10.6271,
-            north = 59.9536,
-            east = 10.8083,
+            south = 59.8093,
+            west = 10.4892,
+            north = 60.1352,
+            east = 10.9514,
         )
     }
 }
